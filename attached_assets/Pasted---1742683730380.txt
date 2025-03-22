@@ -1,0 +1,664 @@
+خیلی خوبه که لاگ خطاها رو برام فرستادی! این کمک می‌کنه که دقیقاً بفهمم مشکل کجاست و بتونم راه‌حل مناسب رو ارائه بدم. بیایم خطاها رو یکی‌یکی بررسی کنیم و مشکل رو حل کنیم. 🚀
+
+---
+
+### 📋 بررسی خطاها
+
+#### 1. **هشدار Deprecation (استفاده از `ephemeral`)**:
+**خطا**:
+```
+(node:757) Warning: Supplying "ephemeral" for interaction response options is deprecated. Utilize flags instead.
+```
+**توضیح**:
+- توی نسخه‌های جدید `discord.js` (نسخه 14 به بعد)، استفاده از `ephemeral: true` برای پاسخ‌های مخفی (ephemeral) منسوخ شده.
+- به جاش باید از `flags: InteractionResponseFlags.Ephemeral` استفاده کنیم.
+- این خطا توی همه جاهایی که از `interaction.reply` یا `interaction.editReply` با `ephemeral: true` استفاده کردی، رخ می‌ده.
+
+**راه‌حل**:
+- باید `ephemeral: true` رو با `flags: 64` (که معادل `InteractionResponseFlags.Ephemeral` هست) جایگزین کنیم.
+- برای این کار، باید `InteractionResponseFlags` رو از `discord.js` وارد کنیم.
+
+**تغییرات**:
+- اول، `InteractionResponseFlags` رو به ایمپورت‌ها اضافه می‌کنیم:
+  ```javascript
+  const { Client, GatewayIntentBits, SlashCommandBuilder, EmbedBuilder, PermissionsBitField, REST, Routes, InteractionResponseFlags } = require('discord.js');
+  ```
+- حالا همه جاهایی که از `ephemeral: true` استفاده کردی، با `flags: InteractionResponseFlags.Ephemeral` جایگزین می‌کنیم. مثلاً:
+  ```javascript
+  await interaction.reply({ content: '✅ کانال نظرسنجی تنظیم شد! 🎉', flags: InteractionResponseFlags.Ephemeral });
+  ```
+
+---
+
+#### 2. **خطای `Error saving settings: Error: Missing second argument (value)`**:
+**خطا**:
+```
+Error saving settings: Error: Missing second argument (value)
+    at QuickDB.set (/home/runner/workspace/node_modules/quick.db/out/index.js:99:19)
+    at saveSettings (/home/runner/workspace/index.js:42:14)
+    at process.processTicksAndRejections (node:internal/process/task_queues:95:5)
+    at async Client.<anonymous> (/home/runner/workspace/index.js:123:7)
+```
+**توضیح**:
+- این خطا توی تابع `saveSettings` رخ می‌ده. خطا می‌گه که متد `QuickDB.set` یه مقدار (value) برای ذخیره نیاز داره، اما مقدار `undefined` یا `null` بهش داده شده.
+- بیایم تابع `saveSettings` رو بررسی کنیم:
+  ```javascript
+  async function saveSettings() {
+    try {
+      await db.set('pollChannel', config.pollChannel);
+      await db.set('moderatorRole', config.moderatorRole);
+      await db.set('activePolls', Array.from(config.activePolls.entries()));
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      throw new Error('Failed to save settings');
+    }
+  }
+  ```
+- مشکل اینجاست که `QuickDB` نمی‌تونه مقادیر `undefined` رو ذخیره کنه. توی این کد، وقتی `config.pollChannel` یا `config.moderatorRole` مقدار `undefined` دارن (مثلاً وقتی هنوز تنظیم نشدن)، `QuickDB.set` خطا می‌ده.
+- این خطا توی `/setpollchannel` و `/setmoderatorrole` هم تکرار میشه، چون این کامندها `saveSettings` رو فراخوانی می‌کنن.
+
+**راه‌حل**:
+- باید مطمئن بشیم که مقادیر `undefined` به `QuickDB.set` ارسال نمیشن. می‌تونیم یه شرط بذاریم که فقط مقادیر معتبر رو ذخیره کنه.
+- همچنین، می‌تونیم یه مقدار پیش‌فرض (مثلاً `null`) برای `config.pollChannel` و `config.moderatorRole` تنظیم کنیم تا از این خطا جلوگیری کنیم.
+
+**تغییرات**:
+- تابع `saveSettings` رو اصلاح می‌کنیم:
+  ```javascript
+  async function saveSettings() {
+    try {
+      if (config.pollChannel !== undefined) {
+        await db.set('pollChannel', config.pollChannel);
+      }
+      if (config.moderatorRole !== undefined) {
+        await db.set('moderatorRole', config.moderatorRole);
+      }
+      await db.set('activePolls', Array.from(config.activePolls.entries()));
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      throw new Error('Failed to save settings');
+    }
+  }
+  ```
+- توی تعریف اولیه `config`، مقادیر پیش‌فرض رو واضح‌تر می‌کنیم:
+  ```javascript
+  const config = {
+    token: process.env.TOKEN,
+    clientId: process.env.CLIENT_ID,
+    pollChannel: null,
+    moderatorRole: null,
+    pendingPolls: new Map(),
+    activePolls: new Map()
+  };
+  ```
+
+---
+
+#### 3. **مشکل ذخیره‌سازی `activePolls` توی دیتابیس**:
+**مشکل**:
+- توی تابع `saveSettings`، داری `activePolls` رو ذخیره می‌کنی:
+  ```javascript
+  await db.set('activePolls', Array.from(config.activePolls.entries()));
+  ```
+- اما `activePolls` یه `Map` هست که شامل `Set` (مثلاً `voters`) میشه. `QuickDB` نمی‌تونه مستقیماً `Set` رو ذخیره کنه، چون این نوع داده به صورت پیش‌فرض قابل سریال‌سازی (serializable) نیست.
+- این باعث میشه که موقع ذخیره‌سازی خطا بگیری یا داده‌ها به درستی ذخیره نشن.
+
+**راه‌حل**:
+- باید `Set` رو به یه نوع داده قابل سریال‌سازی (مثلاً آرایه) تبدیل کنیم قبل از ذخیره‌سازی.
+- موقع لود کردن هم باید آرایه رو به `Set` برگردونیم.
+
+**تغییرات**:
+- تابع `saveSettings` رو اصلاح می‌کنیم تا `Set` رو به آرایه تبدیل کنه:
+  ```javascript
+  async function saveSettings() {
+    try {
+      if (config.pollChannel !== undefined) {
+        await db.set('pollChannel', config.pollChannel);
+      }
+      if (config.moderatorRole !== undefined) {
+        await db.set('moderatorRole', config.moderatorRole);
+      }
+      const activePollsArray = Array.from(config.activePolls.entries()).map(([key, value]) => {
+        return [key, { ...value, voters: Array.from(value.voters) }];
+      });
+      await db.set('activePolls', activePollsArray);
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      throw new Error('Failed to save settings');
+    }
+  }
+  ```
+- توی لود اولیه، داده‌ها رو به `Map` و `Set` برمی‌گردونیم:
+  ```javascript
+  (async () => {
+    try {
+      config.pollChannel = await db.get('pollChannel');
+      config.moderatorRole = await db.get('moderatorRole');
+      const activePollsData = await db.get('activePolls') || [];
+      config.activePolls = new Map(
+        activePollsData.map(([key, value]) => {
+          return [key, { ...value, voters: new Set(value.voters) }];
+        })
+      );
+    } catch (error) {
+      console.error('Error loading settings:', error);
+    }
+  })();
+  ```
+
+---
+
+#### 4. **مدیریت ناکافی خطاها توی `interactionCreate`**:
+**مشکل**:
+- توی بخش `interactionCreate`، اگه خطایی رخ بده (مثلاً خطای `saveSettings`)، پیام خطا به کاربر نشون داده میشه:
+  ```javascript
+  const response = '❌ خطایی رخ داد! لطفاً دوباره تلاش کنید. 🚨';
+  try {
+    if (interaction.replied) {
+      await interaction.editReply({ content: response });
+    } else {
+      await interaction.reply({ content: response, ephemeral: true });
+    }
+  } catch (err) {
+    console.error('Error handling failed:', err);
+  }
+  ```
+- اما اگه خود `interaction.reply` یا `interaction.editReply` خطا بده (مثلاً به خاطر محدودیت دسترسی یا زمان‌اوت تعامل)، این خطا فقط توی کنسول لاگ میشه و ممکنه کاربر هیچ پاسخی دریافت نکنه.
+
+**راه‌حل**:
+- باید یه پیام پیش‌فرض به کانال بفرستیم اگه ارسال پاسخ مستقیم ممکن نباشه.
+
+**تغییرات**:
+- بخش مدیریت خطاها رو اصلاح می‌کنیم:
+  ```javascript
+  client.on('interactionCreate', async interaction => {
+    if (!interaction.isCommand()) return;
+
+    try {
+      // ... بقیه کد ...
+    } catch (error) {
+      console.error('Command error:', error);
+      const response = '❌ خطایی رخ داد! لطفاً دوباره تلاش کنید. 🚨';
+      try {
+        if (interaction.replied) {
+          await interaction.editReply({ content: response, flags: InteractionResponseFlags.Ephemeral });
+        } else if (interaction.deferred) {
+          await interaction.followUp({ content: response, flags: InteractionResponseFlags.Ephemeral });
+        } else {
+          await interaction.reply({ content: response, flags: InteractionResponseFlags.Ephemeral });
+        }
+      } catch (err) {
+        console.error('Error handling failed:', err);
+        try {
+          await interaction.channel.send({ content: response });
+        } catch (channelErr) {
+          console.error('Failed to send error message to channel:', channelErr);
+        }
+      }
+    }
+  });
+  ```
+
+---
+
+#### 5. **عدم مدیریت زمان‌بندی پایدار**:
+**مشکل**:
+- قبلاً هم اشاره کردم که استفاده از `setTimeout` برای زمان‌بندی نظرسنجی‌ها مشکل داره، چون اگه بات ری‌استارت بشه، این زمان‌بندی‌ها از بین می‌رن.
+- تابع `checkActivePolls` این مشکل رو تا حدی حل می‌کنه، اما بهتره که یه سیستم پایدارتر بذاریم.
+
+**راه‌حل**:
+- می‌تونیم از یه `setInterval` استفاده کنیم که هر چند دقیقه (مثلاً هر 1 دقیقه) نظرسنجی‌های فعال رو بررسی کنه و اگه زمانشون تموم شده، نتایج رو اعلام کنه.
+
+**تغییرات**:
+- تابع `checkActivePolls` رو به یه `setInterval` تبدیل می‌کنیم:
+  ```javascript
+  function startPollChecker() {
+    setInterval(async () => {
+      for (const [messageId, poll] of config.activePolls.entries()) {
+        const timeLeft = poll.endTime - Date.now();
+        if (timeLeft <= 0) {
+          try {
+            const channel = await client.channels.fetch(config.pollChannel);
+            const updatedMessage = await channel.messages.fetch(messageId);
+            const reactions = updatedMessage.reactions.cache;
+            const results = poll.options.map((opt, i) => {
+              const reaction = reactions.get(reactionEmojis[i]);
+              const count = reaction ? reaction.count - 1 : 0;
+              return { option: opt, count };
+            });
+
+            const totalVotes = results.reduce((sum, result) => sum + result.count, 0);
+            const resultEmbed = new EmbedBuilder()
+              .setColor(0xFF0000)
+              .setTitle('📊 نتیجه نظرسنجی')
+              .setDescription(`**سوال:** ${poll.question}\n\n**نتایج:**\n${results.map((res, i) => {
+                const percentage = totalVotes > 0 ? ((res.count / totalVotes) * 100).toFixed(1) : 0;
+                return `${reactionEmojis[i]} ${res.option}: ${res.count} رأی (${percentage}%)`;
+              }).join('\n')}\n\n**مجموع آرا:** ${totalVotes}`)
+              .setFooter({ text: 'نظرسنجی تموم شد! 🎉' })
+              .setTimestamp();
+
+            await channel.send({ embeds: [resultEmbed] });
+            config.activePolls.delete(messageId);
+            await saveSettings();
+          } catch (error) {
+            console.error('Error ending poll:', error);
+          }
+        }
+      }
+    }, 60 * 1000); // هر 1 دقیقه
+  }
+  ```
+- تابع `checkActivePolls` رو حذف می‌کنیم و توی `ready` این تابع رو فراخوانی می‌کنیم:
+  ```javascript
+  client.once('ready', () => {
+    console.log(`🚀 Logged in as ${client.user.tag} 🎉`);
+    registerCommands();
+    startPollChecker();
+  });
+  ```
+- توی `/approvepoll`، دیگه نیازی به `setTimeout` نیست، چون `setInterval` کار رو انجام می‌ده.
+
+---
+
+### 📦 کد نهایی اصلاح‌شده:
+
+```javascript
+const { Client, GatewayIntentBits, SlashCommandBuilder, EmbedBuilder, PermissionsBitField, REST, Routes, InteractionResponseFlags } = require('discord.js');
+const { QuickDB } = require('quick.db');
+require('dotenv').config();
+
+const db = new QuickDB();
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMessageReactions
+  ]
+});
+
+const config = {
+  token: process.env.TOKEN,
+  clientId: process.env.CLIENT_ID,
+  pollChannel: null,
+  moderatorRole: null,
+  pendingPolls: new Map(),
+  activePolls: new Map()
+};
+
+if (!config.token || !config.clientId) {
+  console.error('Error: Missing environment variables!');
+  process.exit(1);
+}
+
+(async () => {
+  try {
+    config.pollChannel = await db.get('pollChannel');
+    config.moderatorRole = await db.get('moderatorRole');
+    const activePollsData = await db.get('activePolls') || [];
+    config.activePolls = new Map(
+      activePollsData.map(([key, value]) => {
+        return [key, { ...value, voters: new Set(value.voters) }];
+      })
+    );
+  } catch (error) {
+    console.error('Error loading settings:', error);
+  }
+})();
+
+async function saveSettings() {
+  try {
+    if (config.pollChannel !== undefined) {
+      await db.set('pollChannel', config.pollChannel);
+    }
+    if (config.moderatorRole !== undefined) {
+      await db.set('moderatorRole', config.moderatorRole);
+    }
+    const activePollsArray = Array.from(config.activePolls.entries()).map(([key, value]) => {
+      return [key, { ...value, voters: Array.from(value.voters) }];
+    });
+    await db.set('activePolls', activePollsArray);
+  } catch (error) {
+    console.error('Error saving settings:', error);
+    throw new Error('Failed to save settings');
+  }
+}
+
+const reactionEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];
+
+const commands = [
+  new SlashCommandBuilder()
+    .setName('setpollchannel')
+    .setDescription('تنظیم کانال برای نظرسنجی‌ها 📍')
+    .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageChannels),
+  new SlashCommandBuilder()
+    .setName('setmoderatorrole')
+    .setDescription('تنظیم رول تأییدکننده نظرسنجی‌ها 🛡️')
+    .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageRoles)
+    .addRoleOption(option =>
+      option.setName('role')
+        .setDescription('رول تأییدکننده رو انتخاب کن')
+        .setRequired(true)),
+  new SlashCommandBuilder()
+    .setName('createpoll')
+    .setDescription('یه نظرسنجی جدید بساز 📝')
+    .addStringOption(option =>
+      option.setName('question')
+        .setDescription('سوال نظرسنجی')
+        .setRequired(true)
+        .setMaxLength(256))
+    .addStringOption(option =>
+      option.setName('options')
+        .setDescription('گزینه‌ها رو با | جدا کن (مثلاً: بله | خیر)')
+        .setRequired(true))
+    .addIntegerOption(option =>
+      option.setName('duration')
+        .setDescription('مدت زمان نظرسنجی (به ساعت، پیش‌فرض 24)')
+        .setMinValue(1)
+        .setMaxValue(168)
+        .setRequired(false))
+    .addBooleanOption(option =>
+      option.setName('anonymous')
+        .setDescription('ناشناس باشه؟ (پیش‌فرض خیر)')
+        .setRequired(false)),
+  new SlashCommandBuilder()
+    .setName('approvepoll')
+    .setDescription('تأیید یه نظرسنجی در انتظار ✅')
+    .addStringOption(option =>
+      option.setName('pollid')
+        .setDescription('آیدی نظرسنجی رو وارد کن')
+        .setRequired(true)),
+  new SlashCommandBuilder()
+    .setName('rejectpoll')
+    .setDescription('رد یه نظرسنجی در انتظار ❌')
+    .addStringOption(option =>
+      option.setName('pollid')
+        .setDescription('آیدی نظرسنجی رو وارد کن')
+        .setRequired(true)),
+];
+
+async function registerCommands() {
+  try {
+    const rest = new REST({ version: '10' }).setToken(config.token);
+    await rest.put(Routes.applicationCommands(config.clientId), { body: commands });
+    console.log('Successfully registered commands! ✅');
+  } catch (error) {
+    console.error('Error registering commands:', error);
+  }
+}
+
+function startPollChecker() {
+  setInterval(async () => {
+    for (const [messageId, poll] of config.activePolls.entries()) {
+      const timeLeft = poll.endTime - Date.now();
+      if (timeLeft <= 0) {
+        try {
+          const channel = await client.channels.fetch(config.pollChannel);
+          const updatedMessage = await channel.messages.fetch(messageId);
+          const reactions = updatedMessage.reactions.cache;
+          const results = poll.options.map((opt, i) => {
+            const reaction = reactions.get(reactionEmojis[i]);
+            const count = reaction ? reaction.count - 1 : 0;
+            return { option: opt, count };
+          });
+
+          const totalVotes = results.reduce((sum, result) => sum + result.count, 0);
+          const resultEmbed = new EmbedBuilder()
+            .setColor(0xFF0000)
+            .setTitle('📊 نتیجه نظرسنجی')
+            .setDescription(`**سوال:** ${poll.question}\n\n**نتایج:**\n${results.map((res, i) => {
+              const percentage = totalVotes > 0 ? ((res.count / totalVotes) * 100).toFixed(1) : 0;
+              return `${reactionEmojis[i]} ${res.option}: ${res.count} رأی (${percentage}%)`;
+            }).join('\n')}\n\n**مجموع آرا:** ${totalVotes}`)
+            .setFooter({ text: 'نظرسنجی تموم شد! 🎉' })
+            .setTimestamp();
+
+          await channel.send({ embeds: [resultEmbed] });
+          config.activePolls.delete(messageId);
+          await saveSettings();
+        } catch (error) {
+          console.error('Error ending poll:', error);
+        }
+      }
+    }
+  }, 60 * 1000); // هر 1 دقیقه
+}
+
+client.once('ready', () => {
+  console.log(`🚀 Logged in as ${client.user.tag} 🎉`);
+  registerCommands();
+  startPollChecker();
+});
+
+client.on('interactionCreate', async interaction => {
+  if (!interaction.isCommand()) return;
+
+  try {
+    if (interaction.commandName === 'setpollchannel') {
+      const channel = await client.channels.fetch(interaction.channelId).catch(err => {
+        console.error('Error fetching channel:', err);
+        return null;
+      });
+
+      if (!channel || !channel.isTextBased()) {
+        return interaction.reply({ content: '❌ این کانال معتبر نیست یا دسترسی ندارم! 🚫', flags: InteractionResponseFlags.Ephemeral });
+      }
+
+      config.pollChannel = interaction.channelId;
+      try {
+        await saveSettings();
+        await interaction.reply({ content: '✅ کانال نظرسنجی تنظیم شد! 🎉', flags: InteractionResponseFlags.Ephemeral });
+      } catch (error) {
+        await interaction.reply({ content: '❌ خطا در ذخیره‌سازی تنظیمات! لطفاً دوباره تلاش کنید. 🚨', flags: InteractionResponseFlags.Ephemeral });
+      }
+    }
+
+    if (interaction.commandName === 'setmoderatorrole') {
+      const role = interaction.options.getRole('role');
+      config.moderatorRole = role.id;
+      try {
+        await saveSettings();
+        await interaction.reply({ content: `✅ رول تأییدکننده تنظیم شد: <@&${role.id}> 🎉`, flags: InteractionResponseFlags.Ephemeral });
+      } catch (error) {
+        await interaction.reply({ content: '❌ خطا در ذخیره‌سازی تنظیمات! لطفاً دوباره تلاش کنید. 🚨', flags: InteractionResponseFlags.Ephemeral });
+      }
+    }
+
+    if (interaction.commandName === 'createpoll') {
+      if (!config.pollChannel || !config.moderatorRole) {
+        return interaction.reply({ content: '❌ لطفاً اول کانال و رول تأییدکننده رو تنظیم کنید! 🚨', flags: InteractionResponseFlags.Ephemeral });
+      }
+
+      const channel = await client.channels.fetch(config.pollChannel).catch(err => {
+        console.error('Error fetching poll channel:', err);
+        return null;
+      });
+
+      if (!channel || !channel.isTextBased()) {
+        return interaction.reply({ content: '❌ کانال نظرسنجی معتبر نیست یا دسترسی ندارم! 🚫', flags: InteractionResponseFlags.Ephemeral });
+      }
+
+      if (interaction.channelId !== config.pollChannel) {
+        return interaction.reply({ content: `❌ نظرسنجی فقط توی کانال <#${config.pollChannel}> می‌تونه ساخته بشه! 🚫`, flags: InteractionResponseFlags.Ephemeral });
+      }
+
+      const question = interaction.options.getString('question');
+      const optionsString = interaction.options.getString('options');
+      const duration = interaction.options.getInteger('duration') || 24;
+      const anonymous = interaction.options.getBoolean('anonymous') || false;
+
+      const options = optionsString.split('|').map(opt => opt.trim()).filter(opt => opt);
+      if (options.length < 2 || options.length > 5) {
+        return interaction.reply({ content: '❌ باید بین 2 تا 5 گزینه بذاری! 🚫', flags: InteractionResponseFlags.Ephemeral });
+      }
+
+      if (options.some(opt => opt.length > 100)) {
+        return interaction.reply({ content: '❌ هر گزینه نباید بیشتر از 100 کاراکتر باشه! 🚫', flags: InteractionResponseFlags.Ephemeral });
+      }
+
+      const pollId = Date.now().toString();
+      const pollData = {
+        question,
+        options,
+        duration: duration * 60 * 60 * 1000,
+        anonymous,
+        creator: interaction.user.id,
+        createdAt: Date.now(),
+        endTime: Date.now() + duration * 60 * 60 * 1000,
+        votes: new Array(options.length).fill(0),
+        voters: new Set()
+      };
+
+      config.pendingPolls.set(pollId, pollData);
+
+      const embed = new EmbedBuilder()
+        .setColor(0xFFFF00)
+        .setTitle('📊 نظرسنجی در انتظار تأیید')
+        .setDescription(`**سوال:** ${question}\n**گزینه‌ها:**\n${options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n')}\n**مدت زمان:** ${duration} ساعت\n**ناشناس:** ${anonymous ? 'بله' : 'خیر'}\n**آیدی نظرسنجی:** ${pollId}`)
+        .setFooter({ text: 'در انتظار تأیید توسط مدیران ⏳' })
+        .setTimestamp();
+
+      await interaction.reply({ content: `<@&${config.moderatorRole}> یه نظرسنجی جدید در انتظار تأییده! 🚨`, embeds: [embed] });
+    }
+
+    if (interaction.commandName === 'approvepoll') {
+      if (!interaction.member.roles.cache.has(config.moderatorRole)) {
+        return interaction.reply({ content: '❌ فقط مدیران می‌تونن نظرسنجی رو تأیید کنن! 🚫', flags: InteractionResponseFlags.Ephemeral });
+      }
+
+      const pollId = interaction.options.getString('pollid');
+      const pollData = config.pendingPolls.get(pollId);
+      if (!pollData) {
+        return interaction.reply({ content: '❌ نظرسنجی با این آیدی پیدا نشد! 🚫', flags: InteractionResponseFlags.Ephemeral });
+      }
+
+      if (Date.now() - pollData.createdAt > 24 * 60 * 60 * 1000) {
+        config.pendingPolls.delete(pollId);
+        return interaction.reply({ content: '❌ این نظرسنجی منقضی شده! لطفاً یک نظرسنجی جدید بسازید. 🚫', flags: InteractionResponseFlags.Ephemeral });
+      }
+
+      const channel = await client.channels.fetch(config.pollChannel).catch(err => {
+        console.error('Error fetching poll channel:', err);
+        return null;
+      });
+
+      if (!channel || !channel.isTextBased()) {
+        return interaction.reply({ content: '❌ کانال نظرسنجی معتبر نیست یا دسترسی ندارم! 🚫', flags: InteractionResponseFlags.Ephemeral });
+      }
+
+      const creator = await interaction.guild.members.fetch(pollData.creator).catch(() => null);
+      const embed = new EmbedBuilder()
+        .setColor(0x00FF00)
+        .setTitle('📊 نظرسنجی جدید')
+        .setDescription(`**سوال:** ${pollData.question}\n\n${pollData.options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n')}\n\n**مدت زمان:** ${pollData.duration / (60 * 60 * 1000)} ساعت\n**زمان پایان:** <t:${Math.floor(pollData.endTime / 1000)}:R>`)
+        .setFooter({ text: pollData.anonymous ? 'نظرسنجی ناشناس' : `ایجاد شده توسط ${creator?.displayName || 'کاربر ناشناس'}` })
+        .setTimestamp();
+
+      const message = await channel.send({ embeds: [embed] });
+
+      for (const emoji of reactionEmojis.slice(0, pollData.options.length)) {
+        await message.react(emoji);
+      }
+
+      config.activePolls.set(message.id, { ...pollData, messageId: message.id });
+      config.pendingPolls.delete(pollId);
+      await saveSettings();
+
+      await interaction.reply({ content: '✅ نظرسنجی تأیید و منتشر شد! 🎉', flags: InteractionResponseFlags.Ephemeral });
+    }
+
+    if (interaction.commandName === 'rejectpoll') {
+      if (!interaction.member.roles.cache.has(config.moderatorRole)) {
+        return interaction.reply({ content: '❌ فقط مدیران می‌تونن نظرسنجی رو رد کنن! 🚫', flags: InteractionResponseFlags.Ephemeral });
+      }
+
+      const pollId = interaction.options.getString('pollid');
+      if (!config.pendingPolls.has(pollId)) {
+        return interaction.reply({ content: '❌ نظرسنجی با این آیدی پیدا نشد! 🚫', flags: InteractionResponseFlags.Ephemeral });
+      }
+
+      config.pendingPolls.delete(pollId);
+      await interaction.reply({ content: '❌ نظرسنجی رد شد! 🚫', flags: InteractionResponseFlags.Ephemeral });
+    }
+  } catch (error) {
+    console.error('Command error:', error);
+    const response = '❌ خطایی رخ داد! لطفاً دوباره تلاش کنید. 🚨';
+    try {
+      if (interaction.replied) {
+        await interaction.editReply({ content: response, flags: InteractionResponseFlags.Ephemeral });
+      } else if (interaction.deferred) {
+        await interaction.followUp({ content: response, flags: InteractionResponseFlags.Ephemeral });
+      } else {
+        await interaction.reply({ content: response, flags: InteractionResponseFlags.Ephemeral });
+      }
+    } catch (err) {
+      console.error('Error handling failed:', err);
+      try {
+        await interaction.channel.send({ content: response });
+      } catch (channelErr) {
+        console.error('Failed to send error message to channel:', channelErr);
+      }
+    }
+  }
+});
+
+client.on('messageReactionAdd', async (reaction, user) => {
+  if (user.bot) return;
+  const messageId = reaction.message.id;
+  const poll = config.activePolls.get(messageId);
+  if (!poll) return;
+
+  const emoji = reaction.emoji.name;
+  const optionIndex = reactionEmojis.indexOf(emoji);
+  if (optionIndex === -1 || optionIndex >= poll.options.length) {
+    await reaction.users.remove(user.id);
+    return;
+  }
+
+  if (poll.voters.has(user.id)) {
+    await reaction.users.remove(user.id);
+    return;
+  }
+
+  poll.voters.add(user.id);
+  poll.votes[optionIndex]++;
+  await saveSettings();
+});
+
+client.on('messageReactionRemove', async (reaction, user) => {
+  if (user.bot) return;
+  const messageId = reaction.message.id;
+  const poll = config.activePolls.get(messageId);
+  if (!poll) return;
+
+  const emoji = reaction.emoji.name;
+  const optionIndex = reactionEmojis.indexOf(emoji);
+  if (optionIndex === -1 || optionIndex >= poll.options.length) return;
+
+  if (poll.voters.has(user.id)) {
+    poll.voters.delete(user.id);
+    poll.votes[optionIndex]--;
+    await saveSettings();
+  }
+});
+
+process.on('unhandledRejection', error => {
+  console.error('Unhandled promise rejection:', error);
+});
+
+client.login(config.token).catch(console.error);
+```
+
+---
+
+### 🚀 نتیجه نهایی:
+با این تغییرات، خطاها حل میشن:
+- هشدار `ephemeral` با استفاده از `InteractionResponseFlags.Ephemeral` برطرف شد.
+- خطای `Missing second argument (value)` با مدیریت بهتر مقادیر `undefined` حل شد.
+- مشکل ذخیره‌سازی `activePolls` با تبدیل `Set` به آرایه برطرف شد.
+- مدیریت خطاها بهبود پیدا کرد.
+- زمان‌بندی نظرسنجی‌ها با `setInterval` پایدارتر شد.
+
+این کد رو توی Replit اجرا کن، باید بدون خطا کار کنه. اگه بازم مشکلی داشتی، بگو تا برات حل کنم! 😊
+
+**موفق باشی!** 🌟
