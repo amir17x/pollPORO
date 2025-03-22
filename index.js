@@ -1,4 +1,3 @@
-
 const { Client, GatewayIntentBits, SlashCommandBuilder, EmbedBuilder, PermissionsBitField, REST, Routes } = require('discord.js');
 const { QuickDB } = require('quick.db');
 require('dotenv').config();
@@ -7,9 +6,10 @@ const db = new QuickDB();
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildMessages, 
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMessageReactions
+    GatewayIntentBits.GuildMessageReactions,
+    GatewayIntentBits.GuildMembers
   ]
 });
 
@@ -29,10 +29,11 @@ if (!config.token || !config.clientId) {
 
 async function init() {
   try {
-    config.pollChannel = await db.get('pollChannel');
-    config.moderatorRole = await db.get('moderatorRole');
-    const activePollsData = await db.get('activePolls') || [];
-    config.activePolls = new Map(activePollsData);
+    const settings = await db.get('settings') || {};
+    config.pollChannel = settings.pollChannel || null;
+    config.moderatorRole = settings.moderatorRole || null;
+    config.activePolls = new Map(settings.activePolls || []);
+    console.log('Settings loaded successfully ✅');
   } catch (error) {
     console.error('Error loading settings:', error);
   }
@@ -40,9 +41,12 @@ async function init() {
 
 async function saveSettings() {
   try {
-    await db.set('pollChannel', config.pollChannel);
-    await db.set('moderatorRole', config.moderatorRole);
-    await db.set('activePolls', Array.from(config.activePolls.entries()));
+    const settings = {
+      pollChannel: config.pollChannel,
+      moderatorRole: config.moderatorRole,
+      activePolls: Array.from(config.activePolls.entries())
+    };
+    await db.set('settings', settings);
     return true;
   } catch (error) {
     console.error('Error saving settings:', error);
