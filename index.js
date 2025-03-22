@@ -264,7 +264,16 @@ client.on('interactionCreate', async interaction => {
     }
   } catch (error) {
     console.error('Command error:', error);
-    await interaction.reply({ content: '❌ خطایی رخ داد! لطفاً دوباره تلاش کنید. 🚨', ephemeral: true }).catch(console.error);
+    const response = '❌ خطایی رخ داد! لطفاً دوباره تلاش کنید. 🚨';
+    try {
+      if (interaction.replied) {
+        await interaction.editReply({ content: response });
+      } else {
+        await interaction.reply({ content: response, ephemeral: true });
+      }
+    } catch (err) {
+      console.error('Error handling failed:', err);
+    }
   }
 });
 
