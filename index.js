@@ -38,8 +38,12 @@ if (!config.token || !config.clientId) {
 
 async function saveSettings() {
   try {
-    await db.set('pollChannel', config.pollChannel);
-    await db.set('moderatorRole', config.moderatorRole);
+    if (config.pollChannel) {
+      await db.set('pollChannel', config.pollChannel);
+    }
+    if (config.moderatorRole) {
+      await db.set('moderatorRole', config.moderatorRole);
+    }
   } catch (error) {
     console.error('Error saving settings:', error);
     throw error;
