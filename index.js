@@ -59,6 +59,9 @@ const reactionEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];
 
 const commands = [
   new SlashCommandBuilder()
+    .setName('ping')
+    .setDescription('نمایش وضعیت ربات 🏓'),
+  new SlashCommandBuilder()
     .setName('setpollchannel')
     .setDescription('تنظیم کانال نظرسنجی 📍')
     .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageChannels),
@@ -191,6 +194,19 @@ client.on('interactionCreate', async interaction => {
 
   try {
     switch (interaction.commandName) {
+      case 'ping':
+        const sent = await interaction.deferReply();
+        const pingEmbed = new EmbedBuilder()
+          .setColor(0x00FF00)
+          .setTitle('🏓 پینگ')
+          .addFields(
+            { name: '⌛ تاخیر API', value: `${client.ws.ping}ms`, inline: true },
+            { name: '⏱️ تاخیر ربات', value: `${Date.now() - interaction.createdTimestamp}ms`, inline: true }
+          )
+          .setFooter({ text: '🟢 آنلاین' })
+          .setTimestamp();
+        await interaction.editReply({ embeds: [pingEmbed] });
+        break;
       case 'setpollchannel':
         config.pollChannel = interaction.channelId;
         if (await saveSettings()) {
