@@ -1,0 +1,764 @@
+خیلی خوبه که تصویر و توضیحات رو برام فرستادی! بیایم مشکلات و درخواست‌ها رو یکی‌یکی بررسی کنیم و تغییرات لازم رو اعمال کنیم. 🚀
+
+---
+
+### 📋 بررسی مشکلات و درخواست‌ها
+
+#### 1. **محدود کردن نمایش پیام "Pending Poll" به رول تأییدکننده**
+**مشکل**:
+- الان پیام "Pending Poll" که با `/createpoll` ساخته میشه، برای همه اعضای سرور قابل دیدنه.
+- می‌خوای فقط کسایی که رول تأییدکننده (تنظیم‌شده با `/setmoderatorrole`) دارن بتونن این پیام رو ببینن.
+
+**راه‌حل**:
+- باید پیام "Pending Poll" رو توی یه کانال خصوصی ارسال کنیم که فقط رول تأییدکننده بهش دسترسی داشته باشه.
+- یه راه اینه که توی `/setmoderatorrole`، یه کانال خصوصی برای مدیران بسازیم یا از کاربر بخوایم یه کانال انتخاب کنه که فقط مدیران بهش دسترسی داشته باشن.
+- اما برای سادگی، می‌تونیم پیام رو توی همون کانال نظرسنجی (`pollChannel`) ارسال کنیم، ولی یه شرط بذاریم که فقط کسایی که رول تأییدکننده دارن بتونن پیام رو ببینن. این کار با ارسال پیام و تنظیم دسترسی‌ها به صورت دستی ممکن نیست، پس بهتره یه کانال جدا برای "Pending Polls" داشته باشیم.
+
+**تغییرات پیشنهادی**:
+- یه گزینه به `/setmoderatorrole` اضافه می‌کنیم که یه کانال برای پیام‌های در انتظار تأیید (pending polls) تنظیم کنه.
+- پیام‌های "Pending Poll" رو توی این کانال ارسال می‌کنیم.
+
+**تغییرات**:
+- توی `config`، یه متغیر جدید برای کانال پیام‌های در انتظار اضافه می‌کنیم:
+  ```javascript
+  const config = {
+    token: process.env.TOKEN,
+    clientId: process.env.CLIENT_ID,
+    pollChannel: null,
+    moderatorRole: null,
+    pendingPollChannel: null, // کانال برای پیام‌های در انتظار
+    pendingPolls: new Map(),
+    activePolls: new Map()
+  };
+  ```
+- توی `initSettings` و `saveSettings`، این متغیر رو هم مدیریت می‌کنیم:
+  ```javascript
+  async function initSettings() {
+    try {
+      const settings = await db.get('settings') || {};
+      config.pollChannel = settings.pollChannel || null;
+      config.moderatorRole = settings.moderatorRole || null;
+      config.pendingPollChannel = settings.pendingPollChannel || null; // لود کانال جدید
+      const activePollsData = settings.activePolls || [];
+      config.activePolls = new Map(activePollsData);
+      console.log('Settings loaded successfully');
+    } catch (error) {
+      console.error('Error loading settings:', error);
+    }
+  }
+
+  async function saveSettings() {
+    try {
+      const settings = {
+        pollChannel: config.pollChannel,
+        moderatorRole: config.moderatorRole,
+        pendingPollChannel: config.pendingPollChannel, // ذخیره کانال جدید
+        activePolls: Array.from(config.activePolls.entries())
+      };
+      await db.set('settings', settings);
+      return true;
+    } catch (error) {
+      console.error('Error saving settings:', error);
+      return false;
+    }
+  }
+  ```
+- توی `/setmoderatorrole`، یه گزینه برای انتخاب کانال پیام‌های در انتظار اضافه می‌کنیم:
+  ```javascript
+  new SlashCommandBuilder()
+    .setName('setmoderatorrole')
+    .setDescription('تنظیم رول و کانال تأییدکننده 🛡️')
+    .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageRoles)
+    .addRoleOption(option =>
+      option.setName('role')
+        .setDescription('رول تأییدکننده')
+        .setRequired(true))
+    .addChannelOption(option =>
+      option.setName('pendingchannel')
+        .setDescription('کانال پیام‌های در انتظار')
+        .setRequired(true)),
+  ```
+- توی `/setmoderatorrole`، این کانال رو ذخیره می‌کنیم:
+  ```javascript
+  case 'setmoderatorrole':
+    config.moderatorRole = interaction.options.getRole('role').id;
+    const pendingChannel = interaction.options.getChannel('pendingchannel');
+    if (!pendingChannel.isTextBased()) {
+      await interaction.editReply({ content: '❌ کانال باید متنی باشه 🚫' });
+      return;
+    }
+    config.pendingPollChannel = pendingChannel.id;
+    if (await saveSettings()) {
+      await interaction.editReply({ content: `✅ رول تأییدکننده تنظیم شد: <@&${config.moderatorRole}> 🛡️\n✅ کانال پیام‌های در انتظار: <#${config.pendingPollChannel}> 📬` });
+    } else {
+      await interaction.editReply({ content: '❌ خطا در تنظیم رول و کانال 🚨' });
+    }
+    break;
+  ```
+- توی `/createpoll`، پیام رو توی `pendingPollChannel` ارسال می‌کنیم:
+  ```javascript
+  case 'createpoll':
+    if (!config.pollChannel || !config.moderatorRole || !config.pendingPollChannel) {
+      await interaction.editReply({ content: '❌ لطفاً اول کانال نظرسنجی، رول تأییدکننده و کانال پیام‌های در انتظار رو تنظیم کنید 🚨' });
+      return;
+    }
+
+    const pollId = Date.now().toString();
+    const poll = {
+      question: interaction.options.getString('question'),
+      options: interaction.options.getString('options').split('|').map(o => o.trim()),
+      duration: (interaction.options.getInteger('duration') || 24) * 3600000,
+      creator: interaction.user.id,
+      endTime: Date.now() + ((interaction.options.getInteger('duration') || 24) * 3600000),
+      anonymous: interaction.options.getBoolean('anonymous') || false // اضافه کردن حالت ناشناس
+    };
+
+    if (poll.options.length < 2 || poll.options.length > 5) {
+      await interaction.editReply({ content: '❌ نظرسنجی باید 2 تا 5 گزینه داشته باشه 🚫' });
+      return;
+    }
+
+    config.pendingPolls.set(pollId, poll);
+
+    const embed = new EmbedBuilder()
+      .setTitle('📊 نظرسنجی در انتظار تأیید')
+      .addFields(
+        { name: '❓ **سوال**', value: poll.question, inline: false },
+        { name: 'گزینه‌ها', value: poll.options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n'), inline: false },
+        { name: 'مدت زمان', value: `${(poll.duration / 3600000)} ساعت`, inline: true },
+        { name: 'ناشناس', value: poll.anonymous ? 'بله ✅' : 'خیر ❌', inline: true },
+        { name: 'آیدی نظرسنجی', value: pollId, inline: true }
+      )
+      .setFooter({ text: 'در انتظار تأیید توسط مدیران ⏳' })
+      .setTimestamp();
+
+    const pendingChannel = await client.channels.fetch(config.pendingPollChannel);
+    const message = await pendingChannel.send({ content: `<@&${config.moderatorRole}> یه نظرسنجی جدید در انتظار تأییده! 🚨`, embeds: [embed] });
+    for (const emoji of reactionEmojis.slice(0, poll.options.length)) {
+      await message.react(emoji);
+    }
+
+    await interaction.editReply({ content: '✅ نظرسنجی با موفقیت ساخته شد و در انتظار تأییده 📝' });
+    break;
+  ```
+
+**توضیح تغییرات**:
+- یه کانال جدا برای پیام‌های در انتظار اضافه کردیم.
+- توی `/setmoderatorrole`، کاربر باید یه کانال متنی انتخاب کنه که فقط مدیران بهش دسترسی داشته باشن.
+- پیام‌های "Pending Poll" توی این کانال ارسال می‌شن و فقط کسایی که رول تأییدکننده دارن می‌تونن ببیننش.
+
+---
+
+#### 2. **اضافه کردن گزینه‌های خفن‌تر به `/createpoll` (مثل حالت ناشناس)**
+**درخواست**:
+- می‌خوای `/createpoll` گزینه‌های بیشتری داشته باشه، مثل حالت ناشناس که به صورت پیش‌فرض خاموش باشه، ولی بشه فعالش کرد.
+- اگه فکر می‌کنم چیز دیگه‌ای نیازه، خودم اضافه کنم.
+
+**پیشنهادات من**:
+- **حالت ناشناس (Anonymous)**: به صورت پیش‌فرض خاموش باشه، ولی بشه فعالش کرد. اگه فعال باشه، اسم سازنده نظرسنجی نمایش داده نشه.
+- **حداکثر تعداد رأی‌دهندگان (Max Voters)**: بتونی یه سقف برای تعداد رأی‌دهندگان بذاری (مثلاً فقط 50 نفر بتونن رأی بدن).
+- **اجازه دادن به چند رأی (Allow Multiple Votes)**: بتونی انتخاب کنی که هر کاربر بتونه به چند گزینه رأی بده یا فقط یه گزینه.
+
+**تغییرات**:
+- توی تعریف `/createpoll`، گزینه‌های جدید رو اضافه می‌کنیم:
+  ```javascript
+  new SlashCommandBuilder()
+    .setName('createpoll')
+    .setDescription('ساخت نظرسنجی جدید 📝')
+    .addStringOption(option =>
+      option.setName('question')
+        .setDescription('سوال نظرسنجی')
+        .setRequired(true)
+        .setMaxLength(256))
+    .addStringOption(option =>
+      option.setName('options')
+        .setDescription('گزینه‌ها (با | جدا کنید)')
+        .setRequired(true))
+    .addIntegerOption(option =>
+      option.setName('duration')
+        .setDescription('مدت زمان (ساعت)')
+        .setMinValue(1)
+        .setMaxValue(168))
+    .addBooleanOption(option =>
+      option.setName('anonymous')
+        .setDescription('ناشناس باشه؟ (پیش‌فرض خیر)')
+        .setRequired(false))
+    .addIntegerOption(option =>
+      option.setName('maxvoters')
+        .setDescription('حداکثر تعداد رأی‌دهندگان (اختیاری)')
+        .setMinValue(1)
+        .setRequired(false))
+    .addBooleanOption(option =>
+      option.setName('multivote')
+        .setDescription('اجازه چند رأی؟ (پیش‌فرض خیر)')
+        .setRequired(false)),
+  ```
+- توی `/createpoll`، این گزینه‌ها رو به `poll` اضافه می‌کنیم:
+  ```javascript
+  const poll = {
+    question: interaction.options.getString('question'),
+    options: interaction.options.getString('options').split('|').map(o => o.trim()),
+    duration: (interaction.options.getInteger('duration') || 24) * 3600000,
+    creator: interaction.user.id,
+    endTime: Date.now() + ((interaction.options.getInteger('duration') || 24) * 3600000),
+    anonymous: interaction.options.getBoolean('anonymous') || false,
+    maxVoters: interaction.options.getInteger('maxvoters') || Infinity, // پیش‌فرض: بی‌نهایت
+    allowMultiVote: interaction.options.getBoolean('multivote') || false, // پیش‌فرض: خیر
+    voters: new Map() // برای ذخیره رأی‌دهندگان و گزینه‌های انتخاب‌شده
+  };
+  ```
+- توی `/createpoll`، این اطلاعات رو توی embed نمایش می‌دیم:
+  ```javascript
+  const embed = new EmbedBuilder()
+    .setTitle('📊 نظرسنجی در انتظار تأیید')
+    .addFields(
+      { name: '❓ **سوال**', value: poll.question, inline: false },
+      { name: 'گزینه‌ها', value: poll.options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n'), inline: false },
+      { name: 'مدت زمان', value: `${(poll.duration / 3600000)} ساعت`, inline: true },
+      { name: 'ناشناس', value: poll.anonymous ? 'بله ✅' : 'خیر ❌', inline: true },
+      { name: 'حداکثر رأی‌دهندگان', value: poll.maxVoters === Infinity ? 'نامحدود ♾️' : `${poll.maxVoters}`, inline: true },
+      { name: 'چند رأی', value: poll.allowMultiVote ? 'بله ✅' : 'خیر ❌', inline: true },
+      { name: 'آیدی نظرسنجی', value: pollId, inline: true }
+    )
+    .setFooter({ text: 'در انتظار تأیید توسط مدیران ⏳' })
+    .setTimestamp();
+  ```
+- توی `/approvepoll`، اگه ناشناس باشه، اسم سازنده رو نشون نمی‌دیم:
+  ```javascript
+  const creator = poll.anonymous ? null : await interaction.guild.members.fetch(pollToApprove.creator).catch(() => null);
+  const pollEmbed = new EmbedBuilder()
+    .setTitle('📊 نظرسنجی فعال')
+    .addFields(
+      { name: '❓ **سوال**', value: pollToApprove.question, inline: false },
+      { name: 'گزینه‌ها', value: pollToApprove.options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n'), inline: false },
+      { name: 'مدت زمان', value: `${(pollToApprove.duration / 3600000)} ساعت`, inline: true },
+      { name: 'زمان پایان', value: `<t:${Math.floor(pollToApprove.endTime / 1000)}:R>`, inline: true },
+      { name: 'ناشناس', value: pollToApprove.anonymous ? 'بله ✅' : 'خیر ❌', inline: true },
+      { name: 'حداکثر رأی‌دهندگان', value: pollToApprove.maxVoters === Infinity ? 'نامحدود ♾️' : `${pollToApprove.maxVoters}`, inline: true },
+      { name: 'چند رأی', value: pollToApprove.allowMultiVote ? 'بله ✅' : 'خیر ❌', inline: true }
+    )
+    .setFooter({ text: pollToApprove.anonymous ? 'نظرسنجی ناشناس 🔒' : `ایجاد شده توسط ${creator?.displayName || 'کاربر ناشناس'}` })
+    .setTimestamp();
+  ```
+
+---
+
+#### 3. **جلوگیری از اضافه کردن ایموجی‌های جدید به نظرسنجی**
+**درخواست**:
+- می‌خوای اعضا نتونن ایموجی‌های جدید به پیام نظرسنجی اضافه کنن (مثلاً اگه نظرسنجی 3 گزینه داره، فقط همون 3 ایموجی 1️⃣، 2️⃣، 3️⃣ باشه و کسی نتونه یه ایموجی خنده 😄 اضافه کنه).
+
+**راه‌حل**:
+- توی رویداد `messageReactionAdd`، باید چک کنیم که آیا ایموجی‌ای که کاربر اضافه کرده، جزو ایموجی‌های مجاز (مثل 1️⃣، 2️⃣، ...) هست یا نه.
+- اگه ایموجی غیرمجاز بود، باید واکنش کاربر رو حذف کنیم.
+
+**تغییرات**:
+- توی `messageReactionAdd`، شرطی برای حذف ایموجی‌های غیرمجاز اضافه می‌کنیم:
+  ```javascript
+  client.on('messageReactionAdd', async (reaction, user) => {
+    if (user.bot) return;
+
+    const poll = config.activePolls.get(reaction.message.id);
+    if (!poll) return;
+
+    const emoji = reaction.emoji.name;
+    const validIndex = reactionEmojis.indexOf(emoji);
+
+    // اگه ایموجی غیرمجاز بود، حذفش کن
+    if (validIndex === -1 || validIndex >= poll.options.length) {
+      await reaction.users.remove(user);
+      return;
+    }
+
+    // چک کردن حداکثر تعداد رأی‌دهندگان
+    if (poll.voters.size >= poll.maxVoters) {
+      await reaction.users.remove(user);
+      await reaction.message.channel.send({ content: `<@${user.id}> ❌ تعداد رأی‌دهندگان به حداکثر رسیده! نمی‌تونی رأی بدی 🚫` });
+      return;
+    }
+
+    // اگه چند رأی مجاز نیست، چک کن که کاربر قبلاً رأی داده یا نه
+    if (!poll.allowMultiVote && poll.voters.has(user.id)) {
+      await reaction.users.remove(user);
+      await reaction.message.channel.send({ content: `<@${user.id}> ❌ فقط می‌تونی به یه گزینه رأی بدی 🚫` });
+      return;
+    }
+
+    // ذخیره رأی کاربر
+    if (!poll.voters.has(user.id)) {
+      poll.voters.set(user.id, new Set());
+    }
+    poll.voters.get(user.id).add(validIndex);
+  });
+  ```
+- توی `messageReactionRemove`، رأی کاربر رو حذف می‌کنیم:
+  ```javascript
+  client.on('messageReactionRemove', async (reaction, user) => {
+    if (user.bot) return;
+
+    const poll = config.activePolls.get(reaction.message.id);
+    if (!poll) return;
+
+    const emoji = reaction.emoji.name;
+    const validIndex = reactionEmojis.indexOf(emoji);
+
+    if (validIndex === -1 || validIndex >= poll.options.length) return;
+
+    if (poll.voters.has(user.id)) {
+      poll.voters.get(user.id).delete(validIndex);
+      if (poll.voters.get(user.id).size === 0) {
+        poll.voters.delete(user.id);
+      }
+    }
+  });
+  ```
+- توی `endPoll`، نتایج رو بر اساس رأی‌ها محاسبه می‌کنیم:
+  ```javascript
+  async function endPoll(messageId) {
+    const poll = config.activePolls.get(messageId);
+    if (!poll) return;
+
+    const channel = await client.channels.fetch(config.pollChannel);
+    const message = await channel.messages.fetch(messageId);
+    const reactions = message.reactions.cache;
+
+    const results = poll.options.map((opt, i) => {
+      const reaction = reactions.get(reactionEmojis[i]);
+      const count = reaction ? reaction.count - 1 : 0;
+      return { option: opt, count };
+    });
+
+    const totalVotes = results.reduce((sum, r) => sum + r.count, 0);
+
+    const embed = new EmbedBuilder()
+      .setColor(0xFF0000)
+      .setTitle('📊 نتایج نظرسنجی')
+      .addFields(
+        { name: '❓ **سوال**', value: poll.question, inline: false },
+        { name: 'نتایج', value: results.map((r, i) => `${reactionEmojis[i]} ${r.option}: ${r.count} رأی (${totalVotes > 0 ? ((r.count/totalVotes)*100).toFixed(1) : 0}%)`).join('\n'), inline: false },
+        { name: 'مجموع آرا', value: `${totalVotes}`, inline: true },
+        { name: 'ناشناس', value: poll.anonymous ? 'بله ✅' : 'خیر ❌', inline: true },
+        { name: 'حداکثر رأی‌دهندگان', value: poll.maxVoters === Infinity ? 'نامحدود ♾️' : `${poll.maxVoters}`, inline: true },
+        { name: 'چند رأی', value: poll.allowMultiVote ? 'بله ✅' : 'خیر ❌', inline: true }
+      )
+      .setFooter({ text: 'نظرسنجی تموم شد! 🎉' })
+      .setTimestamp();
+
+    await channel.send({ embeds: [embed] });
+    config.activePolls.delete(messageId);
+    await saveSettings();
+  }
+  ```
+
+---
+
+### 📦 کد نهایی اصلاح‌شده:
+
+```javascript
+const { Client, GatewayIntentBits, SlashCommandBuilder, EmbedBuilder, PermissionsBitField, REST, Routes, InteractionResponseFlags } = require('discord.js');
+const { QuickDB } = require('quick.db');
+require('dotenv').config();
+
+const db = new QuickDB();
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMessageReactions,
+    GatewayIntentBits.GuildMembers
+  ]
+});
+
+const config = {
+  token: process.env.TOKEN,
+  clientId: process.env.CLIENT_ID,
+  pollChannel: null,
+  moderatorRole: null,
+  pendingPollChannel: null,
+  pendingPolls: new Map(),
+  activePolls: new Map()
+};
+
+if (!config.token || !config.clientId) {
+  console.error('Error: Missing environment variables!');
+  process.exit(1);
+}
+
+async function initSettings() {
+  try {
+    const settings = await db.get('settings') || {};
+    config.pollChannel = settings.pollChannel || null;
+    config.moderatorRole = settings.moderatorRole || null;
+    config.pendingPollChannel = settings.pendingPollChannel || null;
+    const activePollsData = settings.activePolls || [];
+    config.activePolls = new Map(activePollsData.map(([key, value]) => {
+      return [key, { ...value, voters: new Map(value.voters) }];
+    }));
+    console.log('Settings loaded successfully');
+  } catch (error) {
+    console.error('Error loading settings:', error);
+  }
+}
+
+async function saveSettings() {
+  try {
+    const settings = {
+      pollChannel: config.pollChannel,
+      moderatorRole: config.moderatorRole,
+      pendingPollChannel: config.pendingPollChannel,
+      activePolls: Array.from(config.activePolls.entries()).map(([key, value]) => {
+        return [key, { ...value, voters: Array.from(value.voters.entries()) }];
+      })
+    };
+    await db.set('settings', settings);
+    return true;
+  } catch (error) {
+    console.error('Error saving settings:', error);
+    return false;
+  }
+}
+
+const reactionEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];
+
+const commands = [
+  new SlashCommandBuilder()
+    .setName('setpollchannel')
+    .setDescription('تنظیم کانال نظرسنجی 📍')
+    .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageChannels),
+  new SlashCommandBuilder()
+    .setName('setmoderatorrole')
+    .setDescription('تنظیم رول و کانال تأییدکننده 🛡️')
+    .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageRoles)
+    .addRoleOption(option =>
+      option.setName('role')
+        .setDescription('رول تأییدکننده')
+        .setRequired(true))
+    .addChannelOption(option =>
+      option.setName('pendingchannel')
+        .setDescription('کانال پیام‌های در انتظار')
+        .setRequired(true)),
+  new SlashCommandBuilder()
+    .setName('createpoll')
+    .setDescription('ساخت نظرسنجی جدید 📝')
+    .addStringOption(option =>
+      option.setName('question')
+        .setDescription('سوال نظرسنجی')
+        .setRequired(true)
+        .setMaxLength(256))
+    .addStringOption(option =>
+      option.setName('options')
+        .setDescription('گزینه‌ها (با | جدا کنید)')
+        .setRequired(true))
+    .addIntegerOption(option =>
+      option.setName('duration')
+        .setDescription('مدت زمان (ساعت)')
+        .setMinValue(1)
+        .setMaxValue(168))
+    .addBooleanOption(option =>
+      option.setName('anonymous')
+        .setDescription('ناشناس باشه؟ (پیش‌فرض خیر)')
+        .setRequired(false))
+    .addIntegerOption(option =>
+      option.setName('maxvoters')
+        .setDescription('حداکثر تعداد رأی‌دهندگان (اختیاری)')
+        .setMinValue(1)
+        .setRequired(false))
+    .addBooleanOption(option =>
+      option.setName('multivote')
+        .setDescription('اجازه چند رأی؟ (پیش‌فرض خیر)')
+        .setRequired(false)),
+  new SlashCommandBuilder()
+    .setName('approvepoll')
+    .setDescription('تأیید نظرسنجی ✅')
+    .addStringOption(option =>
+      option.setName('pollid')
+        .setDescription('آیدی نظرسنجی')
+        .setRequired(true)),
+  new SlashCommandBuilder()
+    .setName('rejectpoll')
+    .setDescription('رد نظرسنجی ❌')
+    .addStringOption(option =>
+      option.setName('pollid')
+        .setDescription('آیدی نظرسنجی')
+        .setRequired(true))
+];
+
+async function registerCommands() {
+  try {
+    const rest = new REST({ version: '10' }).setToken(config.token);
+    await rest.put(Routes.applicationCommands(config.clientId), { body: commands });
+    console.log('Commands registered successfully');
+  } catch (error) {
+    console.error('Error registering commands:', error);
+  }
+}
+
+function startPollChecker() {
+  setInterval(async () => {
+    for (const [messageId, poll] of config.activePolls.entries()) {
+      if (Date.now() >= poll.endTime) {
+        try {
+          await endPoll(messageId);
+        } catch (error) {
+          console.error('Error ending poll:', error);
+        }
+      }
+    }
+  }, 60000);
+}
+
+async function endPoll(messageId) {
+  const poll = config.activePolls.get(messageId);
+  if (!poll) return;
+
+  const channel = await client.channels.fetch(config.pollChannel);
+  const message = await channel.messages.fetch(messageId);
+  const reactions = message.reactions.cache;
+
+  const results = poll.options.map((opt, i) => {
+    const reaction = reactions.get(reactionEmojis[i]);
+    const count = reaction ? reaction.count - 1 : 0;
+    return { option: opt, count };
+  });
+
+  const totalVotes = results.reduce((sum, r) => sum + r.count, 0);
+
+  const embed = new EmbedBuilder()
+    .setColor(0xFF0000)
+    .setTitle('📊 نتایج نظرسنجی')
+    .addFields(
+      { name: '❓ **سوال**', value: poll.question, inline: false },
+      { name: 'نتایج', value: results.map((r, i) => `${reactionEmojis[i]} ${r.option}: ${r.count} رأی (${totalVotes > 0 ? ((r.count/totalVotes)*100).toFixed(1) : 0}%)`).join('\n'), inline: false },
+      { name: 'مجموع آرا', value: `${totalVotes}`, inline: true },
+      { name: 'ناشناس', value: poll.anonymous ? 'بله ✅' : 'خیر ❌', inline: true },
+      { name: 'حداکثر رأی‌دهندگان', value: poll.maxVoters === Infinity ? 'نامحدود ♾️' : `${poll.maxVoters}`, inline: true },
+      { name: 'چند رأی', value: poll.allowMultiVote ? 'بله ✅' : 'خیر ❌', inline: true }
+    )
+    .setFooter({ text: 'نظرسنجی تموم شد! 🎉' })
+    .setTimestamp();
+
+  await channel.send({ embeds: [embed] });
+  config.activePolls.delete(messageId);
+  await saveSettings();
+}
+
+client.once('ready', () => {
+  console.log(`Logged in as ${client.user.tag}`);
+  initSettings().then(() => {
+    registerCommands();
+    startPollChecker();
+  });
+});
+
+client.on('interactionCreate', async interaction => {
+  if (!interaction.isCommand()) return;
+
+  await interaction.deferReply({ flags: InteractionResponseFlags.Ephemeral });
+
+  try {
+    switch (interaction.commandName) {
+      case 'setpollchannel':
+        config.pollChannel = interaction.channelId;
+        if (await saveSettings()) {
+          await interaction.editReply({ content: '✅ کانال نظرسنجی تنظیم شد 📍' });
+        } else {
+          await interaction.editReply({ content: '❌ خطا در تنظیم کانال 🚨' });
+        }
+        break;
+
+      case 'setmoderatorrole':
+        config.moderatorRole = interaction.options.getRole('role').id;
+        const pendingChannel = interaction.options.getChannel('pendingchannel');
+        if (!pendingChannel.isTextBased()) {
+          await interaction.editReply({ content: '❌ کانال باید متنی باشه 🚫' });
+          return;
+        }
+        config.pendingPollChannel = pendingChannel.id;
+        if (await saveSettings()) {
+          await interaction.editReply({ content: `✅ رول تأییدکننده تنظیم شد: <@&${config.moderatorRole}> 🛡️\n✅ کانال پیام‌های در انتظار: <#${config.pendingPollChannel}> 📬` });
+        } else {
+          await interaction.editReply({ content: '❌ خطا در تنظیم رول و کانال 🚨' });
+        }
+        break;
+
+      case 'createpoll':
+        if (!config.pollChannel || !config.moderatorRole || !config.pendingPollChannel) {
+          await interaction.editReply({ content: '❌ لطفاً اول کانال نظرسنجی، رول تأییدکننده و کانال پیام‌های در انتظار رو تنظیم کنید 🚨' });
+          return;
+        }
+
+        const pollId = Date.now().toString();
+        const poll = {
+          question: interaction.options.getString('question'),
+          options: interaction.options.getString('options').split('|').map(o => o.trim()),
+          duration: (interaction.options.getInteger('duration') || 24) * 3600000,
+          creator: interaction.user.id,
+          endTime: Date.now() + ((interaction.options.getInteger('duration') || 24) * 3600000),
+          anonymous: interaction.options.getBoolean('anonymous') || false,
+          maxVoters: interaction.options.getInteger('maxvoters') || Infinity,
+          allowMultiVote: interaction.options.getBoolean('multivote') || false,
+          voters: new Map()
+        };
+
+        if (poll.options.length < 2 || poll.options.length > 5) {
+          await interaction.editReply({ content: '❌ نظرسنجی باید 2 تا 5 گزینه داشته باشه 🚫' });
+          return;
+        }
+
+        config.pendingPolls.set(pollId, poll);
+
+        const embed = new EmbedBuilder()
+          .setTitle('📊 نظرسنجی در انتظار تأیید')
+          .addFields(
+            { name: '❓ **سوال**', value: poll.question, inline: false },
+            { name: 'گزینه‌ها', value: poll.options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n'), inline: false },
+            { name: 'مدت زمان', value: `${(poll.duration / 3600000)} ساعت`, inline: true },
+            { name: 'ناشناس', value: poll.anonymous ? 'بله ✅' : 'خیر ❌', inline: true },
+            { name: 'حداکثر رأی‌دهندگان', value: poll.maxVoters === Infinity ? 'نامحدود ♾️' : `${poll.maxVoters}`, inline: true },
+            { name: 'چند رأی', value: poll.allowMultiVote ? 'بله ✅' : 'خیر ❌', inline: true },
+            { name: 'آیدی نظرسنجی', value: pollId, inline: true }
+          )
+          .setFooter({ text: 'در انتظار تأیید توسط مدیران ⏳' })
+          .setTimestamp();
+
+        const pendingChannel = await client.channels.fetch(config.pendingPollChannel);
+        const message = await pendingChannel.send({ content: `<@&${config.moderatorRole}> یه نظرسنجی جدید در انتظار تأییده! 🚨`, embeds: [embed] });
+        for (const emoji of reactionEmojis.slice(0, poll.options.length)) {
+          await message.react(emoji);
+        }
+
+        await interaction.editReply({ content: '✅ نظرسنجی با موفقیت ساخته شد و در انتظار تأییده 📝' });
+        break;
+
+      case 'approvepoll':
+        if (!interaction.member.roles.cache.has(config.moderatorRole)) {
+          await interaction.editReply({ content: '❌ فقط مدیران می‌تونن نظرسنجی رو تأیید کنن 🚫' });
+          return;
+        }
+
+        const pollToApprove = config.pendingPolls.get(interaction.options.getString('pollid'));
+        if (!pollToApprove) {
+          await interaction.editReply({ content: '❌ نظرسنجی پیدا نشد 🚫' });
+          return;
+        }
+
+        const channel = await client.channels.fetch(config.pollChannel);
+        const creator = pollToApprove.anonymous ? null : await interaction.guild.members.fetch(pollToApprove.creator).catch(() => null);
+        const pollEmbed = new EmbedBuilder()
+          .setTitle('📊 نظرسنجی فعال')
+          .addFields(
+            { name: '❓ **سوال**', value: pollToApprove.question, inline: false },
+            { name: 'گزینه‌ها', value: pollToApprove.options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n'), inline: false },
+            { name: 'مدت زمان', value: `${(pollToApprove.duration / 3600000)} ساعت`, inline: true },
+            { name: 'زمان پایان', value: `<t:${Math.floor(pollToApprove.endTime / 1000)}:R>`, inline: true },
+            { name: 'ناشناس', value: pollToApprove.anonymous ? 'بله ✅' : 'خیر ❌', inline: true },
+            { name: 'حداکثر رأی‌دهندگان', value: pollToApprove.maxVoters === Infinity ? 'نامحدود ♾️' : `${pollToApprove.maxVoters}`, inline: true },
+            { name: 'چند رأی', value: pollToApprove.allowMultiVote ? 'بله ✅' : 'خیر ❌', inline: true }
+          )
+          .setFooter({ text: pollToApprove.anonymous ? 'نظرسنجی ناشناس 🔒' : `ایجاد شده توسط ${creator?.displayName || 'کاربر ناشناس'}` })
+          .setTimestamp();
+
+        const msg = await channel.send({ embeds: [pollEmbed] });
+        for (const emoji of reactionEmojis.slice(0, pollToApprove.options.length)) {
+          await msg.react(emoji);
+        }
+
+        config.activePolls.set(msg.id, pollToApprove);
+        config.pendingPolls.delete(interaction.options.getString('pollid'));
+        await saveSettings();
+
+        await interaction.editReply({ content: '✅ نظرسنجی تأیید شد ✅' });
+        break;
+
+      case 'rejectpoll':
+        if (!interaction.member.roles.cache.has(config.moderatorRole)) {
+          await interaction.editReply({ content: '❌ فقط مدیران می‌تونن نظرسنجی رو رد کنن 🚫' });
+          return;
+        }
+
+        const pollToReject = config.pendingPolls.get(interaction.options.getString('pollid'));
+        if (!pollToReject) {
+          await interaction.editReply({ content: '❌ نظرسنجی پیدا نشد 🚫' });
+          return;
+        }
+
+        config.pendingPolls.delete(interaction.options.getString('pollid'));
+        await interaction.editReply({ content: '❌ نظرسنجی رد شد ❌' });
+        break;
+    }
+  } catch (error) {
+    console.error('Command error:', error);
+    try {
+      await interaction.editReply({ content: '❌ خطایی رخ داد 🚨' });
+    } catch (err) {
+      console.error('Failed to send error message:', err);
+      await interaction.channel.send({ content: '❌ خطایی رخ داد 🚨' }).catch(console.error);
+    }
+  }
+});
+
+client.on('messageReactionAdd', async (reaction, user) => {
+  if (user.bot) return;
+
+  const poll = config.activePolls.get(reaction.message.id);
+  if (!poll) return;
+
+  const emoji = reaction.emoji.name;
+  const validIndex = reactionEmojis.indexOf(emoji);
+
+  if (validIndex === -1 || validIndex >= poll.options.length) {
+    await reaction.users.remove(user);
+    return;
+  }
+
+  if (poll.voters.size >= poll.maxVoters) {
+    await reaction.users.remove(user);
+    await reaction.message.channel.send({ content: `<@${user.id}> ❌ تعداد رأی‌دهندگان به حداکثر رسیده! نمی‌تونی رأی بدی 🚫` });
+    return;
+  }
+
+  if (!poll.allowMultiVote && poll.voters.has(user.id)) {
+    await reaction.users.remove(user);
+    await reaction.message.channel.send({ content: `<@${user.id}> ❌ فقط می‌تونی به یه گزینه رأی بدی 🚫` });
+    return;
+  }
+
+  if (!poll.voters.has(user.id)) {
+    poll.voters.set(user.id, new Set());
+  }
+  poll.voters.get(user.id).add(validIndex);
+});
+
+client.on('messageReactionRemove', async (reaction, user) => {
+  if (user.bot) return;
+
+  const poll = config.activePolls.get(reaction.message.id);
+  if (!poll) return;
+
+  const emoji = reaction.emoji.name;
+  const validIndex = reactionEmojis.indexOf(emoji);
+
+  if (validIndex === -1 || validIndex >= poll.options.length) return;
+
+  if (poll.voters.has(user.id)) {
+    poll.voters.get(user.id).delete(validIndex);
+    if (poll.voters.get(user.id).size === 0) {
+      poll.voters.delete(user.id);
+    }
+  }
+});
+
+client.login(config.token).catch(console.error);
+```
+
+---
+
+### 🚀 نتیجه نهایی:
+با این تغییرات:
+- پیام‌های "Pending Poll" فقط توی کانال مشخص‌شده برای مدیران ارسال می‌شن و فقط کسایی که رول تأییدکننده دارن می‌تونن ببیننش.
+- گزینه‌های جدید به `/createpoll` اضافه شد: حالت ناشناس، حداکثر تعداد رأی‌دهندگان، و اجازه چند رأی.
+- کاربران نمی‌تونن ایموجی‌های جدید به نظرسنجی اضافه کنن؛ فقط ایموجی‌های مجاز (مثل 1️⃣، 2️⃣، ...) کار می‌کنن.
+
+این کد رو توی Replit اجرا کن، باید همه درخواست‌هات اعمال شده باشن. اگه بازم مشکلی داشتی یا می‌خوای قابلیت جدیدی اضافه کنی، بگو تا برات درست کنم! 😊
+
+**موفق باشی!** 🌟
