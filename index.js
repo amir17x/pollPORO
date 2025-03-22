@@ -296,7 +296,9 @@ client.on('interactionCreate', async interaction => {
     }
   } catch (error) {
     console.error('Error in command:', error);
-    await interaction.reply({ content: '❌ خطایی رخ داد', ephemeral: true }).catch(console.error);
+    if (!interaction.replied && !interaction.deferred) {
+      await interaction.reply({ content: '❌ خطایی رخ داد', ephemeral: true }).catch(console.error);
+    }
   }
 });
 
