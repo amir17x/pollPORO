@@ -1,4 +1,3 @@
-
 const { Client, GatewayIntentBits, SlashCommandBuilder, EmbedBuilder, PermissionsBitField, REST, Routes, InteractionResponseFlags } = require('discord.js');
 const { QuickDB } = require('quick.db');
 require('dotenv').config();
@@ -104,7 +103,10 @@ const commands = [
     .addStringOption(option =>
       option.setName('pollid')
         .setDescription('آیدی نظرسنجی')
-        .setRequired(true))
+        .setRequired(true)),
+  new SlashCommandBuilder()
+    .setName('ping')
+    .setDescription('بررسی پینگ ربات')
 ];
 
 async function registerCommands() {
@@ -283,7 +285,7 @@ client.on('interactionCreate', async interaction => {
 
       case 'rejectpoll':
         if (!interaction.member.roles.cache.has(config.moderatorRole)) {
-          await interaction.reply({ content: '❌ شما دسترسی رد نظرسنجی را ندارید', ephemeral: true });
+          await interaction.reply({ content: '❌ فقط مدیران می‌تونن نظرسنجی رو رد کنن 🚫' });
           return;
         }
 
@@ -292,6 +294,21 @@ client.on('interactionCreate', async interaction => {
         } else {
           await interaction.reply({ content: '❌ نظرسنجی مورد نظر یافت نشد', ephemeral: true });
         }
+        break;
+
+      case 'ping':
+        const botPing = client.ws.ping;
+        const pingEmbed = new EmbedBuilder()
+          .setTitle('🏓 پونگ!')
+          .setColor(0x00FF00)
+          .addFields(
+            { name: '📡 پینگ ربات', value: `${botPing}ms`, inline: true },
+            { name: '🌐 پینگ API', value: 'N/A', inline: true }
+          )
+          .setFooter({ text: `درخواست توسط ${interaction.user.tag}` })
+          .setTimestamp();
+
+        await interaction.reply({ embeds: [pingEmbed] });
         break;
     }
   } catch (error) {
