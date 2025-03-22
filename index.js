@@ -191,6 +191,9 @@ client.once('ready', () => {
 
 client.on('interactionCreate', async interaction => {
   if (!interaction.isCommand()) return;
+  
+  // Defer reply immediately for all commands
+  await interaction.deferReply({ ephemeral: true });
 
   try {
     switch (interaction.commandName) {
@@ -210,7 +213,7 @@ client.on('interactionCreate', async interaction => {
       case 'setpollchannel':
         config.pollChannel = interaction.channelId;
         if (await saveSettings()) {
-          await interaction.reply({ content: '✅ کانال نظرسنجی با موفقیت تنظیم شد', ephemeral: true });
+          await interaction.editReply({ content: '✅ کانال نظرسنجی با موفقیت تنظیم شد' });
         } else {
           await interaction.reply({ content: '❌ خطا در تنظیم کانال', ephemeral: true });
         }
