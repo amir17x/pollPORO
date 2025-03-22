@@ -1,0 +1,639 @@
+خیلی خوبه که تصویر، کد فعلی، و لاگ کنسول رو برام فرستادی! این کمک می‌کنه که دقیقاً بفهمم چه مشکلاتی وجود داره و چطور می‌تونیم حلشون کنیم. بیایم مشکلات رو یکی‌یکی بررسی کنیم و تغییرات لازم رو اعمال کنیم. 🚀
+
+---
+
+### 📋 بررسی مشکلات و درخواست‌ها
+
+#### 1. **عدم وجود ایموجی‌های رأی‌دهی زیر پیام نظرسنجی در انتظار (`Pending Poll`)**:
+**مشکل**:
+- توی تصویر، می‌بینم که پیام "Pending Poll" که با `/createpoll` ساخته شده، زیرش ایموجی‌های رأی‌دهی (مثل 1️⃣، 2️⃣ و...) وجود نداره.
+- دلیلش اینه که توی کد فعلی، فقط توی مرحله `/approvepoll` (بعد از تأیید نظرسنجی) ایموجی‌ها به پیام اضافه می‌شن، اما توی مرحله "در انتظار تأیید" این اتفاق نمی‌افته.
+
+**راه‌حل**:
+- باید توی بخش `/createpoll` هم بعد از ارسال embed، ایموجی‌ها رو به پیام اضافه کنیم تا مدیران بتونن نظرشون رو با واکنش نشون بدن (مثلاً برای تأیید یا رد سریع‌تر).
+
+**تغییرات**:
+- توی بخش `/createpoll`، بعد از ارسال embed، ایموجی‌ها رو اضافه می‌کنیم:
+  ```javascript
+  const embed = new EmbedBuilder()
+    .setTitle('📊 نظرسنجی در انتظار تأیید')
+    .setDescription(
+      `**سوال:** ${poll.question}\n\n` +
+      poll.options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n') +
+      `\n\n**مدت زمان:** ${(poll.duration / 3600000)} ساعت\n**آیدی نظرسنجی:** ${pollId}`
+    )
+    .setFooter({ text: 'در انتظار تأیید توسط مدیران ⏳' })
+    .setTimestamp();
+
+  const message = await interaction.reply({ content: `<@&${config.moderatorRole}> یه نظرسنجی جدید در انتظار تأییده! 🚨`, embeds: [embed], fetchReply: true });
+  for (const emoji of reactionEmojis.slice(0, poll.options.length)) {
+    await message.react(emoji);
+  }
+  ```
+
+**توضیح تغییرات**:
+- `fetchReply: true` رو به `interaction.reply` اضافه کردیم تا بتونیم پیام ارسال‌شده رو بگیریم.
+- بعد از ارسال پیام، با `message.react` ایموجی‌ها رو به پیام اضافه می‌کنیم.
+
+---
+
+#### 2. **بزرگ و بولد کردن تیتر "Question" در embed**:
+**درخواست**:
+- می‌خوای که کلمه "سوال" توی embed بزرگ‌تر و بولد بشه.
+
+**راه‌حل**:
+- توی `discord.js`، نمی‌تونیم مستقیماً اندازه فونت رو تغییر بدیم (چون Discord این امکان رو نداره)، اما می‌تونیم با استفاده از **بولد کردن** (`**`) و اضافه کردن ایموجی، حس بزرگ‌تر بودن رو القا کنیم.
+- همچنین می‌تونیم از `addFields` برای جدا کردن بخش "سوال" استفاده کنیم تا برجسته‌تر بشه.
+
+**تغییرات**:
+- توی بخش `/createpoll` و `/approvepoll`، embed رو اصلاح می‌کنیم:
+  ```javascript
+  // برای /createpoll
+  const embed = new EmbedBuilder()
+    .setTitle('📊 نظرسنجی در انتظار تأیید')
+    .addFields(
+      { name: '❓ **سوال**', value: poll.question, inline: false },
+      { name: 'گزینه‌ها', value: poll.options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n'), inline: false },
+      { name: 'مدت زمان', value: `${(poll.duration / 3600000)} ساعت`, inline: true },
+      { name: 'آیدی نظرسنجی', value: pollId, inline: true }
+    )
+    .setFooter({ text: 'در انتظار تأیید توسط مدیران ⏳' })
+    .setTimestamp();
+
+  // برای /approvepoll
+  const pollEmbed = new EmbedBuilder()
+    .setTitle('📊 نظرسنجی فعال')
+    .addFields(
+      { name: '❓ **سوال**', value: pollToApprove.question, inline: false },
+      { name: 'گزینه‌ها', value: pollToApprove.options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n'), inline: false },
+      { name: 'مدت زمان', value: `${(pollToApprove.duration / 3600000)} ساعت`, inline: true },
+      { name: 'زمان پایان', value: `<t:${Math.floor(pollToApprove.endTime / 1000)}:R>`, inline: true }
+    )
+    .setTimestamp();
+  ```
+
+**توضیح تغییرات**:
+- از `addFields` استفاده کردیم تا بخش‌های مختلف embed جدا بشن.
+- کلمه "سوال" رو با `**` بولد کردیم و یه ایموجی ❓ جلوش گذاشتیم تا برجسته‌تر بشه.
+
+---
+
+#### 3. **فارسی کردن توضیحات کامندها به صورت مختصر**:
+**درخواست**:
+- می‌خوای توضیحات کامندها (description) فارسی و مختصر باشه.
+
+**تغییرات**:
+- توضیحات کامندها رو توی آرایه `commands` اصلاح می‌کنیم:
+  ```javascript
+  const commands = [
+    new SlashCommandBuilder()
+      .setName('setpollchannel')
+      .setDescription('تنظیم کانال نظرسنجی 📍')
+      .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageChannels),
+    new SlashCommandBuilder()
+      .setName('setmoderatorrole')
+      .setDescription('تنظیم رول تأییدکننده 🛡️')
+      .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageRoles)
+      .addRoleOption(option =>
+        option.setName('role')
+          .setDescription('رول تأییدکننده')
+          .setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('createpoll')
+      .setDescription('ساخت نظرسنجی جدید 📝')
+      .addStringOption(option =>
+        option.setName('question')
+          .setDescription('سوال نظرسنجی')
+          .setRequired(true)
+          .setMaxLength(256))
+      .addStringOption(option =>
+        option.setName('options')
+          .setDescription('گزینه‌ها (با | جدا کنید)')
+          .setRequired(true))
+      .addIntegerOption(option =>
+        option.setName('duration')
+          .setDescription('مدت زمان (ساعت)')
+          .setMinValue(1)
+          .setMaxValue(168)),
+    new SlashCommandBuilder()
+      .setName('approvepoll')
+      .setDescription('تأیید نظرسنجی ✅')
+      .addStringOption(option =>
+        option.setName('pollid')
+          .setDescription('آیدی نظرسنجی')
+          .setRequired(true)),
+    new SlashCommandBuilder()
+      .setName('rejectpoll')
+      .setDescription('رد نظرسنجی ❌')
+      .addStringOption(option =>
+        option.setName('pollid')
+          .setDescription('آیدی نظرسنجی')
+          .setRequired(true))
+  ];
+  ```
+
+**توضیح تغییرات**:
+- توضیحات همه کامندها و گزینه‌هاشون رو فارسی و مختصر کردیم.
+- ایموجی‌های مرتبط اضافه کردیم تا جذاب‌تر بشن.
+
+---
+
+#### 4. **حل خطاهای لاگ کنسول**:
+**خطاها**:
+1. **هشدار `ephemeral` منسوخ شده**:
+   ```
+   (node:1432) Warning: Supplying "ephemeral" for interaction response options is deprecated. Utilize flags instead.
+   ```
+   - این خطا به خاطر استفاده از `ephemeral: true` توی پاسخ‌های تعاملی (interaction replies) هست. باید از `flags: InteractionResponseFlags.Ephemeral` استفاده کنیم.
+
+2. **خطای `Unknown interaction` و `Interaction has already been acknowledged`**:
+   ```
+   DiscordAPIError[10062]: Unknown interaction
+   DiscordAPIError[40060]: Interaction has already been acknowledged.
+   ```
+   - این خطاها به این معنی هستن که بات داره سعی می‌کنه به یه تعامل (interaction) پاسخ بده، اما یا تعامل منقضی شده (بعد از 3 ثانیه) یا قبلاً پاسخ داده شده.
+   - دلیلش اینه که توی کد فعلی، مدیریت تعامل‌ها به درستی انجام نمیشه و ممکنه بات چند بار سعی کنه به یه تعامل پاسخ بده.
+
+**راه‌حل**:
+- **برای خطای `ephemeral`**:
+  - `InteractionResponseFlags` رو به ایمپورت‌ها اضافه می‌کنیم:
+    ```javascript
+    const { Client, GatewayIntentBits, SlashCommandBuilder, EmbedBuilder, PermissionsBitField, REST, Routes, InteractionResponseFlags } = require('discord.js');
+    ```
+  - همه `ephemeral: true` رو با `flags: InteractionResponseFlags.Ephemeral` جایگزین می‌کنیم.
+
+- **برای خطای `Unknown interaction` و `Interaction has already been acknowledged`**:
+  - باید مطمئن بشیم که بات فقط یه بار به هر تعامل پاسخ می‌ده.
+  - می‌تونیم از `interaction.deferReply` استفاده کنیم تا زمان بیشتری برای پردازش داشته باشیم و از منقضی شدن تعامل جلوگیری کنیم.
+  - همچنین باید مدیریت خطاها رو بهبود بدیم تا اگه تعامل منقضی شد، پیام خطا به کانال ارسال بشه.
+
+**تغییرات**:
+- توی `interactionCreate`، از `deferReply` استفاده می‌کنیم و مدیریت خطاها رو بهبود می‌دیم:
+  ```javascript
+  client.on('interactionCreate', async interaction => {
+    if (!interaction.isCommand()) return;
+
+    await interaction.deferReply({ ephemeral: true }); // پاسخ رو به تعویق می‌ندازیم
+
+    try {
+      switch (interaction.commandName) {
+        case 'setpollchannel':
+          config.pollChannel = interaction.channelId;
+          if (await saveSettings()) {
+            await interaction.editReply({ content: '✅ کانال نظرسنجی تنظیم شد 📍' });
+          } else {
+            await interaction.editReply({ content: '❌ خطا در تنظیم کانال 🚨' });
+          }
+          break;
+
+        case 'setmoderatorrole':
+          config.moderatorRole = interaction.options.getRole('role').id;
+          if (await saveSettings()) {
+            await interaction.editReply({ content: `✅ رول تأییدکننده تنظیم شد: <@&${config.moderatorRole}> 🛡️` });
+          } else {
+            await interaction.editReply({ content: '❌ خطا در تنظیم رول 🚨' });
+          }
+          break;
+
+        case 'createpoll':
+          if (!config.pollChannel || !config.moderatorRole) {
+            await interaction.editReply({ content: '❌ لطفاً اول کانال و رول تأییدکننده رو تنظیم کنید 🚨' });
+            return;
+          }
+
+          const pollId = Date.now().toString();
+          const poll = {
+            question: interaction.options.getString('question'),
+            options: interaction.options.getString('options').split('|').map(o => o.trim()),
+            duration: (interaction.options.getInteger('duration') || 24) * 3600000,
+            creator: interaction.user.id,
+            endTime: Date.now() + ((interaction.options.getInteger('duration') || 24) * 3600000)
+          };
+
+          if (poll.options.length < 2 || poll.options.length > 5) {
+            await interaction.editReply({ content: '❌ نظرسنجی باید 2 تا 5 گزینه داشته باشه 🚫' });
+            return;
+          }
+
+          config.pendingPolls.set(pollId, poll);
+
+          const embed = new EmbedBuilder()
+            .setTitle('📊 نظرسنجی در انتظار تأیید')
+            .addFields(
+              { name: '❓ **سوال**', value: poll.question, inline: false },
+              { name: 'گزینه‌ها', value: poll.options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n'), inline: false },
+              { name: 'مدت زمان', value: `${(poll.duration / 3600000)} ساعت`, inline: true },
+              { name: 'آیدی نظرسنجی', value: pollId, inline: true }
+            )
+            .setFooter({ text: 'در انتظار تأیید توسط مدیران ⏳' })
+            .setTimestamp();
+
+          const message = await interaction.channel.send({ content: `<@&${config.moderatorRole}> یه نظرسنجی جدید در انتظار تأییده! 🚨`, embeds: [embed] });
+          for (const emoji of reactionEmojis.slice(0, poll.options.length)) {
+            await message.react(emoji);
+          }
+
+          await interaction.editReply({ content: '✅ نظرسنجی با موفقیت ساخته شد و در انتظار تأییده 📝' });
+          break;
+
+        case 'approvepoll':
+          if (!interaction.member.roles.cache.has(config.moderatorRole)) {
+            await interaction.editReply({ content: '❌ فقط مدیران می‌تونن نظرسنجی رو تأیید کنن 🚫' });
+            return;
+          }
+
+          const pollToApprove = config.pendingPolls.get(interaction.options.getString('pollid'));
+          if (!pollToApprove) {
+            await interaction.editReply({ content: '❌ نظرسنجی پیدا نشد 🚫' });
+            return;
+          }
+
+          const channel = await client.channels.fetch(config.pollChannel);
+          const pollEmbed = new EmbedBuilder()
+            .setTitle('📊 نظرسنجی فعال')
+            .addFields(
+              { name: '❓ **سوال**', value: pollToApprove.question, inline: false },
+              { name: 'گزینه‌ها', value: pollToApprove.options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n'), inline: false },
+              { name: 'مدت زمان', value: `${(pollToApprove.duration / 3600000)} ساعت`, inline: true },
+              { name: 'زمان پایان', value: `<t:${Math.floor(pollToApprove.endTime / 1000)}:R>`, inline: true }
+            )
+            .setTimestamp();
+
+          const msg = await channel.send({ embeds: [pollEmbed] });
+          for (const emoji of reactionEmojis.slice(0, pollToApprove.options.length)) {
+            await msg.react(emoji);
+          }
+
+          config.activePolls.set(msg.id, pollToApprove);
+          config.pendingPolls.delete(interaction.options.getString('pollid'));
+          await saveSettings();
+
+          await interaction.editReply({ content: '✅ نظرسنجی تأیید شد ✅' });
+          break;
+
+        case 'rejectpoll':
+          if (!interaction.member.roles.cache.has(config.moderatorRole)) {
+            await interaction.editReply({ content: '❌ فقط مدیران می‌تونن نظرسنجی رو رد کنن 🚫' });
+            return;
+          }
+
+          const pollToReject = config.pendingPolls.get(interaction.options.getString('pollid'));
+          if (!pollToReject) {
+            await interaction.editReply({ content: '❌ نظرسنجی پیدا نشد 🚫' });
+            return;
+          }
+
+          config.pendingPolls.delete(interaction.options.getString('pollid'));
+          await interaction.editReply({ content: '❌ نظرسنجی رد شد ❌' });
+          break;
+      }
+    } catch (error) {
+      console.error('Command error:', error);
+      try {
+        await interaction.editReply({ content: '❌ خطایی رخ داد 🚨' });
+      } catch (err) {
+        console.error('Failed to send error message:', err);
+        await interaction.channel.send({ content: '❌ خطایی رخ داد 🚨' }).catch(console.error);
+      }
+    }
+  });
+  ```
+
+**توضیح تغییرات**:
+- با `interaction.deferReply`، پاسخ اولیه رو به تعویق می‌ندازیم تا زمان بیشتری برای پردازش داشته باشیم.
+- از `interaction.editReply` برای ارسال پاسخ نهایی استفاده می‌کنیم.
+- مدیریت خطاها رو بهبود دادیم تا اگه تعامل منقضی شد، پیام خطا به کانال ارسال بشه.
+- همه `ephemeral: true` رو با `flags: InteractionResponseFlags.Ephemeral` جایگزین کردیم (توی کد بالا فعلاً به صورت پیش‌فرض ephemeral هست، اما توی کد نهایی کامل جایگزین می‌کنیم).
+
+---
+
+### 📦 کد نهایی اصلاح‌شده:
+
+```javascript
+const { Client, GatewayIntentBits, SlashCommandBuilder, EmbedBuilder, PermissionsBitField, REST, Routes, InteractionResponseFlags } = require('discord.js');
+const { QuickDB } = require('quick.db');
+require('dotenv').config();
+
+const db = new QuickDB();
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMessageReactions,
+    GatewayIntentBits.GuildMembers
+  ]
+});
+
+const config = {
+  token: process.env.TOKEN,
+  clientId: process.env.CLIENT_ID,
+  pollChannel: null,
+  moderatorRole: null,
+  pendingPolls: new Map(),
+  activePolls: new Map()
+};
+
+if (!config.token || !config.clientId) {
+  console.error('Error: Missing environment variables!');
+  process.exit(1);
+}
+
+async function initSettings() {
+  try {
+    const settings = await db.get('settings') || {};
+    config.pollChannel = settings.pollChannel || null;
+    config.moderatorRole = settings.moderatorRole || null;
+    const activePollsData = settings.activePolls || [];
+    config.activePolls = new Map(activePollsData);
+    console.log('Settings loaded successfully');
+  } catch (error) {
+    console.error('Error loading settings:', error);
+  }
+}
+
+async function saveSettings() {
+  try {
+    const settings = {
+      pollChannel: config.pollChannel,
+      moderatorRole: config.moderatorRole,
+      activePolls: Array.from(config.activePolls.entries())
+    };
+    await db.set('settings', settings);
+    return true;
+  } catch (error) {
+    console.error('Error saving settings:', error);
+    return false;
+  }
+}
+
+const reactionEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];
+
+const commands = [
+  new SlashCommandBuilder()
+    .setName('setpollchannel')
+    .setDescription('تنظیم کانال نظرسنجی 📍')
+    .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageChannels),
+  new SlashCommandBuilder()
+    .setName('setmoderatorrole')
+    .setDescription('تنظیم رول تأییدکننده 🛡️')
+    .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageRoles)
+    .addRoleOption(option =>
+      option.setName('role')
+        .setDescription('رول تأییدکننده')
+        .setRequired(true)),
+  new SlashCommandBuilder()
+    .setName('createpoll')
+    .setDescription('ساخت نظرسنجی جدید 📝')
+    .addStringOption(option =>
+      option.setName('question')
+        .setDescription('سوال نظرسنجی')
+        .setRequired(true)
+        .setMaxLength(256))
+    .addStringOption(option =>
+      option.setName('options')
+        .setDescription('گزینه‌ها (با | جدا کنید)')
+        .setRequired(true))
+    .addIntegerOption(option =>
+      option.setName('duration')
+        .setDescription('مدت زمان (ساعت)')
+        .setMinValue(1)
+        .setMaxValue(168)),
+  new SlashCommandBuilder()
+    .setName('approvepoll')
+    .setDescription('تأیید نظرسنجی ✅')
+    .addStringOption(option =>
+      option.setName('pollid')
+        .setDescription('آیدی نظرسنجی')
+        .setRequired(true)),
+  new SlashCommandBuilder()
+    .setName('rejectpoll')
+    .setDescription('رد نظرسنجی ❌')
+    .addStringOption(option =>
+      option.setName('pollid')
+        .setDescription('آیدی نظرسنجی')
+        .setRequired(true))
+];
+
+async function registerCommands() {
+  try {
+    const rest = new REST({ version: '10' }).setToken(config.token);
+    await rest.put(Routes.applicationCommands(config.clientId), { body: commands });
+    console.log('Commands registered successfully');
+  } catch (error) {
+    console.error('Error registering commands:', error);
+  }
+}
+
+function startPollChecker() {
+  setInterval(async () => {
+    for (const [messageId, poll] of config.activePolls.entries()) {
+      if (Date.now() >= poll.endTime) {
+        try {
+          await endPoll(messageId);
+        } catch (error) {
+          console.error('Error ending poll:', error);
+        }
+      }
+    }
+  }, 60000);
+}
+
+async function endPoll(messageId) {
+  const poll = config.activePolls.get(messageId);
+  if (!poll) return;
+
+  const channel = await client.channels.fetch(config.pollChannel);
+  const message = await channel.messages.fetch(messageId);
+  const reactions = message.reactions.cache;
+
+  const results = poll.options.map((opt, i) => {
+    const reaction = reactions.get(reactionEmojis[i]);
+    const count = reaction ? reaction.count - 1 : 0;
+    return { option: opt, count };
+  });
+
+  const totalVotes = results.reduce((sum, r) => sum + r.count, 0);
+
+  const embed = new EmbedBuilder()
+    .setColor(0xFF0000)
+    .setTitle('📊 نتایج نظرسنجی')
+    .addFields(
+      { name: '❓ **سوال**', value: poll.question, inline: false },
+      { name: 'نتایج', value: results.map((r, i) => `${reactionEmojis[i]} ${r.option}: ${r.count} رأی (${totalVotes > 0 ? ((r.count/totalVotes)*100).toFixed(1) : 0}%)`).join('\n'), inline: false },
+      { name: 'مجموع آرا', value: `${totalVotes}`, inline: true }
+    )
+    .setFooter({ text: 'نظرسنجی تموم شد! 🎉' })
+    .setTimestamp();
+
+  await channel.send({ embeds: [embed] });
+  config.activePolls.delete(messageId);
+  await saveSettings();
+}
+
+client.once('ready', () => {
+  console.log(`Logged in as ${client.user.tag}`);
+  initSettings().then(() => {
+    registerCommands();
+    startPollChecker();
+  });
+});
+
+client.on('interactionCreate', async interaction => {
+  if (!interaction.isCommand()) return;
+
+  await interaction.deferReply({ flags: InteractionResponseFlags.Ephemeral });
+
+  try {
+    switch (interaction.commandName) {
+      case 'setpollchannel':
+        config.pollChannel = interaction.channelId;
+        if (await saveSettings()) {
+          await interaction.editReply({ content: '✅ کانال نظرسنجی تنظیم شد 📍' });
+        } else {
+          await interaction.editReply({ content: '❌ خطا در تنظیم کانال 🚨' });
+        }
+        break;
+
+      case 'setmoderatorrole':
+        config.moderatorRole = interaction.options.getRole('role').id;
+        if (await saveSettings()) {
+          await interaction.editReply({ content: `✅ رول تأییدکننده تنظیم شد: <@&${config.moderatorRole}> 🛡️` });
+        } else {
+          await interaction.editReply({ content: '❌ خطا در تنظیم رول 🚨' });
+        }
+        break;
+
+      case 'createpoll':
+        if (!config.pollChannel || !config.moderatorRole) {
+          await interaction.editReply({ content: '❌ لطفاً اول کانال و رول تأییدکننده رو تنظیم کنید 🚨' });
+          return;
+        }
+
+        const pollId = Date.now().toString();
+        const poll = {
+          question: interaction.options.getString('question'),
+          options: interaction.options.getString('options').split('|').map(o => o.trim()),
+          duration: (interaction.options.getInteger('duration') || 24) * 3600000,
+          creator: interaction.user.id,
+          endTime: Date.now() + ((interaction.options.getInteger('duration') || 24) * 3600000)
+        };
+
+        if (poll.options.length < 2 || poll.options.length > 5) {
+          await interaction.editReply({ content: '❌ نظرسنجی باید 2 تا 5 گزینه داشته باشه 🚫' });
+          return;
+        }
+
+        config.pendingPolls.set(pollId, poll);
+
+        const embed = new EmbedBuilder()
+          .setTitle('📊 نظرسنجی در انتظار تأیید')
+          .addFields(
+            { name: '❓ **سوال**', value: poll.question, inline: false },
+            { name: 'گزینه‌ها', value: poll.options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n'), inline: false },
+            { name: 'مدت زمان', value: `${(poll.duration / 3600000)} ساعت`, inline: true },
+            { name: 'آیدی نظرسنجی', value: pollId, inline: true }
+          )
+          .setFooter({ text: 'در انتظار تأیید توسط مدیران ⏳' })
+          .setTimestamp();
+
+        const message = await interaction.channel.send({ content: `<@&${config.moderatorRole}> یه نظرسنجی جدید در انتظار تأییده! 🚨`, embeds: [embed] });
+        for (const emoji of reactionEmojis.slice(0, poll.options.length)) {
+          await message.react(emoji);
+        }
+
+        await interaction.editReply({ content: '✅ نظرسنجی با موفقیت ساخته شد و در انتظار تأییده 📝' });
+        break;
+
+      case 'approvepoll':
+        if (!interaction.member.roles.cache.has(config.moderatorRole)) {
+          await interaction.editReply({ content: '❌ فقط مدیران می‌تونن نظرسنجی رو تأیید کنن 🚫' });
+          return;
+        }
+
+        const pollToApprove = config.pendingPolls.get(interaction.options.getString('pollid'));
+        if (!pollToApprove) {
+          await interaction.editReply({ content: '❌ نظرسنجی پیدا نشد 🚫' });
+          return;
+        }
+
+        const channel = await client.channels.fetch(config.pollChannel);
+        const pollEmbed = new EmbedBuilder()
+          .setTitle('📊 نظرسنجی فعال')
+          .addFields(
+            { name: '❓ **سوال**', value: pollToApprove.question, inline: false },
+            { name: 'گزینه‌ها', value: pollToApprove.options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n'), inline: false },
+            { name: 'مدت زمان', value: `${(pollToApprove.duration / 3600000)} ساعت`, inline: true },
+            { name: 'زمان پایان', value: `<t:${Math.floor(pollToApprove.endTime / 1000)}:R>`, inline: true }
+          )
+          .setTimestamp();
+
+        const msg = await channel.send({ embeds: [pollEmbed] });
+        for (const emoji of reactionEmojis.slice(0, pollToApprove.options.length)) {
+          await msg.react(emoji);
+        }
+
+        config.activePolls.set(msg.id, pollToApprove);
+        config.pendingPolls.delete(interaction.options.getString('pollid'));
+        await saveSettings();
+
+        await interaction.editReply({ content: '✅ نظرسنجی تأیید شد ✅' });
+        break;
+
+      case 'rejectpoll':
+        if (!interaction.member.roles.cache.has(config.moderatorRole)) {
+          await interaction.editReply({ content: '❌ فقط مدیران می‌تونن نظرسنجی رو رد کنن 🚫' });
+          return;
+        }
+
+        const pollToReject = config.pendingPolls.get(interaction.options.getString('pollid'));
+        if (!pollToReject) {
+          await interaction.editReply({ content: '❌ نظرسنجی پیدا نشد 🚫' });
+          return;
+        }
+
+        config.pendingPolls.delete(interaction.options.getString('pollid'));
+        await interaction.editReply({ content: '❌ نظرسنجی رد شد ❌' });
+        break;
+    }
+  } catch (error) {
+    console.error('Command error:', error);
+    try {
+      await interaction.editReply({ content: '❌ خطایی رخ داد 🚨' });
+    } catch (err) {
+      console.error('Failed to send error message:', err);
+      await interaction.channel.send({ content: '❌ خطایی رخ داد 🚨' }).catch(console.error);
+    }
+  }
+});
+
+client.on('messageReactionAdd', async (reaction, user) => {
+  if (user.bot) return;
+
+  const poll = config.activePolls.get(reaction.message.id);
+  if (!poll) return;
+
+  const emoji = reaction.emoji.name;
+  const validIndex = reactionEmojis.indexOf(emoji);
+
+  if (validIndex === -1 || validIndex >= poll.options.length) {
+    await reaction.users.remove(user);
+  }
+});
+
+client.login(config.token).catch(console.error);
+```
+
+---
+
+### 🚀 نتیجه نهایی:
+با این تغییرات:
+- ایموجی‌های رأی‌دهی زیر پیام "Pending Poll" اضافه شدن.
+- کلمه "سوال" توی embed بولد شد و با یه ایموجی برجسته‌تر شد.
+- توضیحات کامندها فارسی و مختصر شدن.
+- خطاهای `Unknown interaction` و `Interaction has already been acknowledged` با استفاده از `deferReply` حل شدن.
+- هشدار `ephemeral` با استفاده از `InteractionResponseFlags.Ephemeral` برطرف شد.
+
+این کد رو توی Replit اجرا کن، باید همه مشکلات حل شده باشن. اگه بازم مشکلی داشتی یا می‌خوای قابلیت جدیدی اضافه کنی، بگو تا برات درست کنم! 😊
+
+**موفق باشی!** 🌟
