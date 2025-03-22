@@ -6,7 +6,7 @@ const db = new QuickDB();
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages, 
+    GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
     GatewayIntentBits.GuildMessageReactions,
     GatewayIntentBits.GuildMembers
@@ -27,13 +27,13 @@ if (!config.token || !config.clientId) {
   process.exit(1);
 }
 
-async function init() {
+async function initSettings() {
   try {
     const settings = await db.get('settings') || {};
     config.pollChannel = settings.pollChannel || null;
     config.moderatorRole = settings.moderatorRole || null;
     config.activePolls = new Map(settings.activePolls || []);
-    console.log('Settings loaded successfully ✅');
+    console.log('Settings loaded successfully');
   } catch (error) {
     console.error('Error loading settings:', error);
   }
@@ -59,21 +59,19 @@ const reactionEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];
 const commands = [
   new SlashCommandBuilder()
     .setName('setpollchannel')
-    .setDescription('Set poll channel 📍')
+    .setDescription('Set poll channel')
     .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageChannels),
-  
   new SlashCommandBuilder()
     .setName('setmoderatorrole')
-    .setDescription('Set moderator role 🛡️')
+    .setDescription('Set moderator role')
     .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageRoles)
     .addRoleOption(option =>
       option.setName('role')
         .setDescription('Select moderator role')
         .setRequired(true)),
-  
   new SlashCommandBuilder()
     .setName('createpoll')
-    .setDescription('Create a new poll 📝')
+    .setDescription('Create a new poll')
     .addStringOption(option =>
       option.setName('question')
         .setDescription('Poll question')
@@ -81,313 +79,194 @@ const commands = [
         .setMaxLength(256))
     .addStringOption(option =>
       option.setName('options')
-        .setDescription('Options separated by | (e.g: Yes | No)')
+        .setDescription('Options separated by |')
         .setRequired(true))
     .addIntegerOption(option =>
       option.setName('duration')
-        .setDescription('Poll duration in hours (default: 24)')
+        .setDescription('Poll duration in hours')
         .setMinValue(1)
-        .setMaxValue(168))
-    .addBooleanOption(option =>
-      option.setName('anonymous')
-        .setDescription('Anonymous poll? (default: false)')),
-  
+        .setMaxValue(168)),
   new SlashCommandBuilder()
     .setName('approvepoll')
-    .setDescription('Approve a pending poll ✅')
+    .setDescription('Approve a pending poll')
     .addStringOption(option =>
       option.setName('pollid')
-        .setDescription('Enter poll ID')
+        .setDescription('Poll ID')
         .setRequired(true)),
-  
   new SlashCommandBuilder()
     .setName('rejectpoll')
-    .setDescription('Reject a pending poll ❌')
+    .setDescription('Reject a pending poll')
     .addStringOption(option =>
       option.setName('pollid')
-        .setDescription('Enter poll ID')
-        .setRequired(true)),
+        .setDescription('Poll ID')
+        .setRequired(true))
 ];
 
 async function registerCommands() {
   try {
     const rest = new REST({ version: '10' }).setToken(config.token);
     await rest.put(Routes.applicationCommands(config.clientId), { body: commands });
-    console.log('Successfully registered commands! ✅');
+    console.log('Commands registered successfully');
   } catch (error) {
     console.error('Error registering commands:', error);
   }
 }
 
-client.once('ready', () => {
-  console.log(`🚀 Logged in as ${client.user.tag}`);
-  init().then(() => {
-    registerCommands();
-    checkActivePolls();
-  });
-});
-
-async function checkActivePolls() {
-  for (const [messageId, poll] of config.activePolls.entries()) {
-    if (!poll.endTime) continue;
-    
-    const timeLeft = poll.endTime - Date.now();
-    if (timeLeft <= 0) {
-      try {
-        await endPoll(messageId);
-      } catch (error) {
-        console.error('Error ending poll:', error);
+function startPollChecker() {
+  setInterval(async () => {
+    for (const [messageId, poll] of config.activePolls.entries()) {
+      if (Date.now() >= poll.endTime) {
+        try {
+          await endPoll(messageId);
+        } catch (error) {
+          console.error('Error ending poll:', error);
+        }
       }
-    } else {
-      setTimeout(() => endPoll(messageId), timeLeft);
     }
-  }
+  }, 60000);
 }
 
 async function endPoll(messageId) {
   const poll = config.activePolls.get(messageId);
   if (!poll) return;
 
-  try {
-    const channel = await client.channels.fetch(config.pollChannel);
-    if (!channel) throw new Error('Channel not found');
+  const channel = await client.channels.fetch(config.pollChannel);
+  const message = await channel.messages.fetch(messageId);
+  const reactions = message.reactions.cache;
 
-    const message = await channel.messages.fetch(messageId);
-    const reactions = message.reactions.cache;
-    
-    const results = poll.options.map((opt, i) => {
-      const reaction = reactions.get(reactionEmojis[i]);
-      const count = reaction ? reaction.count - 1 : 0;
-      return { option: opt, count };
-    });
+  const results = poll.options.map((opt, i) => {
+    const reaction = reactions.get(reactionEmojis[i]);
+    const count = reaction ? reaction.count - 1 : 0;
+    return { option: opt, count };
+  });
 
-    const totalVotes = results.reduce((sum, result) => sum + result.count, 0);
-    
-    const resultEmbed = new EmbedBuilder()
-      .setColor(0xFF0000)
-      .setTitle('📊 Poll Results')
-      .setDescription(`**Question:** ${poll.question}\n\n**Results:**\n${results.map((res, i) => {
-        const percentage = totalVotes > 0 ? ((res.count / totalVotes) * 100).toFixed(1) : 0;
-        return `${reactionEmojis[i]} ${res.option}: ${res.count} votes (${percentage}%)`;
-      }).join('\n')}\n\n**Total votes:** ${totalVotes}`)
-      .setFooter({ text: 'Poll ended! 🎉' })
-      .setTimestamp();
+  const totalVotes = results.reduce((sum, r) => sum + r.count, 0);
 
-    await channel.send({ embeds: [resultEmbed] });
-    config.activePolls.delete(messageId);
-    await saveSettings();
-  } catch (error) {
-    console.error('Error ending poll:', error);
-  }
+  const embed = new EmbedBuilder()
+    .setColor(0xFF0000)
+    .setTitle('Poll Results')
+    .setDescription(
+      `Question: ${poll.question}\n\n` +
+      results.map((r, i) => `${reactionEmojis[i]} ${r.option}: ${r.count} votes (${totalVotes > 0 ? ((r.count/totalVotes)*100).toFixed(1) : 0}%)`).join('\n') +
+      `\n\nTotal votes: ${totalVotes}`
+    )
+    .setTimestamp();
+
+  await channel.send({ embeds: [embed] });
+  config.activePolls.delete(messageId);
+  await saveSettings();
 }
+
+client.once('ready', () => {
+  console.log(`Logged in as ${client.user.tag}`);
+  initSettings().then(() => {
+    registerCommands();
+    startPollChecker();
+  });
+});
 
 client.on('interactionCreate', async interaction => {
   if (!interaction.isCommand()) return;
 
   try {
     switch (interaction.commandName) {
-      case 'setpollchannel': {
-        const channel = interaction.channel;
-        if (!channel.isTextBased()) {
-          return interaction.reply({ content: '❌ Invalid channel type! Must be a text channel.', ephemeral: true });
+      case 'setpollchannel':
+        config.pollChannel = interaction.channelId;
+        if (await saveSettings()) {
+          await interaction.reply({ content: 'Poll channel set', ephemeral: true });
         }
-
-        config.pollChannel = channel.id;
-        const saved = await saveSettings();
-        
-        if (!saved) {
-          return interaction.reply({ content: '❌ Failed to save settings! Please try again.', ephemeral: true });
-        }
-
-        await interaction.reply({ content: '✅ Poll channel set successfully!', ephemeral: true });
         break;
-      }
 
-      case 'setmoderatorrole': {
-        const role = interaction.options.getRole('role');
-        config.moderatorRole = role.id;
-        const saved = await saveSettings();
-
-        if (!saved) {
-          return interaction.reply({ content: '❌ Failed to save settings! Please try again.', ephemeral: true });
+      case 'setmoderatorrole':
+        config.moderatorRole = interaction.options.getRole('role').id;
+        if (await saveSettings()) {
+          await interaction.reply({ content: 'Moderator role set', ephemeral: true });
         }
-
-        await interaction.reply({ content: `✅ Moderator role set to ${role.name}!`, ephemeral: true });
         break;
-      }
 
-      case 'createpoll': {
+      case 'createpoll':
         if (!config.pollChannel || !config.moderatorRole) {
-          return interaction.reply({ content: '❌ Please set up poll channel and moderator role first!', ephemeral: true });
-        }
-
-        const question = interaction.options.getString('question');
-        const optionsStr = interaction.options.getString('options');
-        const duration = interaction.options.getInteger('duration') || 24;
-        const anonymous = interaction.options.getBoolean('anonymous') || false;
-
-        const options = optionsStr.split('|').map(opt => opt.trim()).filter(Boolean);
-        
-        if (options.length < 2 || options.length > 5) {
-          return interaction.reply({ content: '❌ Poll must have 2-5 options!', ephemeral: true });
+          await interaction.reply({ content: 'Please set up poll channel and moderator role first', ephemeral: true });
+          return;
         }
 
         const pollId = Date.now().toString();
-        const endTime = Date.now() + (duration * 60 * 60 * 1000);
-
-        const pollData = {
-          question,
-          options,
-          duration: duration * 60 * 60 * 1000,
-          endTime,
-          anonymous,
+        const poll = {
+          question: interaction.options.getString('question'),
+          options: interaction.options.getString('options').split('|').map(o => o.trim()),
+          duration: (interaction.options.getInteger('duration') || 24) * 3600000,
           creator: interaction.user.id,
-          votes: new Array(options.length).fill(0),
-          voters: new Set()
+          endTime: Date.now() + ((interaction.options.getInteger('duration') || 24) * 3600000)
         };
 
-        config.pendingPolls.set(pollId, pollData);
-
-        const embed = new EmbedBuilder()
-          .setColor(0xFFFF00)
-          .setTitle('📊 Pending Poll')
-          .setDescription(
-            `**Question:** ${question}\n` +
-            `**Options:**\n${options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n')}\n` +
-            `**Duration:** ${duration}h\n` +
-            `**Anonymous:** ${anonymous ? 'Yes' : 'No'}\n` +
-            `**Poll ID:** ${pollId}`
-          )
-          .setFooter({ text: 'Awaiting moderator approval ⏳' })
-          .setTimestamp();
-
-        await interaction.reply({ 
-          content: `<@&${config.moderatorRole}> New poll awaiting approval!`,
-          embeds: [embed]
-        });
-        break;
-      }
-
-      case 'approvepoll': {
-        if (!interaction.member.roles.cache.has(config.moderatorRole)) {
-          return interaction.reply({ content: '❌ You need moderator role to approve polls!', ephemeral: true });
+        if (poll.options.length < 2 || poll.options.length > 5) {
+          await interaction.reply({ content: 'Poll must have 2-5 options', ephemeral: true });
+          return;
         }
 
-        const pollId = interaction.options.getString('pollid');
-        const pollData = config.pendingPolls.get(pollId);
+        config.pendingPolls.set(pollId, poll);
 
-        if (!pollData) {
-          return interaction.reply({ content: '❌ Poll not found!', ephemeral: true });
+        const embed = new EmbedBuilder()
+          .setTitle('Pending Poll')
+          .setDescription(
+            `Question: ${poll.question}\n\n` +
+            poll.options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n')
+          )
+          .setFooter({ text: `Poll ID: ${pollId}` });
+
+        await interaction.reply({ embeds: [embed] });
+        break;
+
+      case 'approvepoll':
+        const pollToApprove = config.pendingPolls.get(interaction.options.getString('pollid'));
+        if (!pollToApprove) {
+          await interaction.reply({ content: 'Poll not found', ephemeral: true });
+          return;
         }
 
         const channel = await client.channels.fetch(config.pollChannel);
-        if (!channel) {
-          return interaction.reply({ content: '❌ Poll channel not found!', ephemeral: true });
-        }
-
-        const embed = new EmbedBuilder()
-          .setColor(0x00FF00)
-          .setTitle('📊 Active Poll')
+        const pollEmbed = new EmbedBuilder()
+          .setTitle('Active Poll')
           .setDescription(
-            `**Question:** ${pollData.question}\n\n` +
-            `${pollData.options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n')}\n\n` +
-            `**Ends:** <t:${Math.floor(pollData.endTime / 1000)}:R>`
-          )
-          .setFooter({ text: pollData.anonymous ? 'Anonymous Poll' : `Created by ${interaction.guild.members.cache.get(pollData.creator)?.displayName || 'Unknown'}` })
-          .setTimestamp();
+            `Question: ${pollToApprove.question}\n\n` +
+            pollToApprove.options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n')
+          );
 
-        const message = await channel.send({ embeds: [embed] });
-
-        for (const emoji of reactionEmojis.slice(0, pollData.options.length)) {
-          await message.react(emoji);
+        const msg = await channel.send({ embeds: [pollEmbed] });
+        for (const emoji of reactionEmojis.slice(0, pollToApprove.options.length)) {
+          await msg.react(emoji);
         }
 
-        config.activePolls.set(message.id, { ...pollData, messageId: message.id });
-        config.pendingPolls.delete(pollId);
+        config.activePolls.set(msg.id, pollToApprove);
+        config.pendingPolls.delete(interaction.options.getString('pollid'));
         await saveSettings();
 
-        setTimeout(() => endPoll(message.id), pollData.duration);
-
-        await interaction.reply({ content: '✅ Poll approved and published!', ephemeral: true });
+        await interaction.reply({ content: 'Poll approved', ephemeral: true });
         break;
-      }
 
-      case 'rejectpoll': {
-        if (!interaction.member.roles.cache.has(config.moderatorRole)) {
-          return interaction.reply({ content: '❌ You need moderator role to reject polls!', ephemeral: true });
-        }
-
-        const pollId = interaction.options.getString('pollid');
-        if (!config.pendingPolls.has(pollId)) {
-          return interaction.reply({ content: '❌ Poll not found!', ephemeral: true });
-        }
-
-        config.pendingPolls.delete(pollId);
-        await interaction.reply({ content: '❌ Poll rejected!', ephemeral: true });
+      case 'rejectpoll':
+        config.pendingPolls.delete(interaction.options.getString('pollid'));
+        await interaction.reply({ content: 'Poll rejected', ephemeral: true });
         break;
-      }
     }
   } catch (error) {
     console.error('Command error:', error);
-    try {
-      const response = '❌ An error occurred! Please try again.';
-      if (interaction.replied) {
-        await interaction.editReply({ content: response });
-      } else {
-        await interaction.reply({ content: response, ephemeral: true });
-      }
-    } catch (err) {
-      console.error('Error handling failed:', err);
-    }
+    await interaction.reply({ content: 'An error occurred', ephemeral: true }).catch(console.error);
   }
 });
 
 client.on('messageReactionAdd', async (reaction, user) => {
   if (user.bot) return;
-  
-  const messageId = reaction.message.id;
-  const poll = config.activePolls.get(messageId);
+
+  const poll = config.activePolls.get(reaction.message.id);
   if (!poll) return;
 
   const emoji = reaction.emoji.name;
-  const optionIndex = reactionEmojis.indexOf(emoji);
-  
-  if (optionIndex === -1 || optionIndex >= poll.options.length) {
-    await reaction.users.remove(user.id);
-    return;
+  const validIndex = reactionEmojis.indexOf(emoji);
+
+  if (validIndex === -1 || validIndex >= poll.options.length) {
+    await reaction.users.remove(user);
   }
-
-  if (poll.voters.has(user.id)) {
-    await reaction.users.remove(user.id);
-    return;
-  }
-
-  poll.voters.add(user.id);
-  poll.votes[optionIndex]++;
-  await saveSettings();
-});
-
-client.on('messageReactionRemove', async (reaction, user) => {
-  if (user.bot) return;
-  
-  const messageId = reaction.message.id;
-  const poll = config.activePolls.get(messageId);
-  if (!poll) return;
-
-  const emoji = reaction.emoji.name;
-  const optionIndex = reactionEmojis.indexOf(emoji);
-  
-  if (optionIndex === -1 || optionIndex >= poll.options.length) return;
-
-  if (poll.voters.has(user.id)) {
-    poll.voters.delete(user.id);
-    poll.votes[optionIndex]--;
-    await saveSettings();
-  }
-});
-
-process.on('unhandledRejection', error => {
-  console.error('Unhandled promise rejection:', error);
 });
 
 client.login(config.token).catch(console.error);
