@@ -1,4 +1,5 @@
-const { Client, GatewayIntentBits, SlashCommandBuilder, EmbedBuilder, PermissionsBitField, REST, Routes } = require('discord.js');
+
+const { Client, GatewayIntentBits, SlashCommandBuilder, EmbedBuilder, PermissionsBitField, REST, Routes, InteractionResponseFlags } = require('discord.js');
 const { QuickDB } = require('quick.db');
 require('dotenv').config();
 
@@ -33,9 +34,9 @@ async function initSettings() {
     config.pollChannel = settings.pollChannel || null;
     config.moderatorRole = settings.moderatorRole || null;
     config.activePolls = new Map(settings.activePolls || []);
-    console.log('Settings loaded successfully');
+    console.log('🚀 تنظیمات با موفقیت بارگذاری شد');
   } catch (error) {
-    console.error('Error loading settings:', error);
+    console.error('خطا در بارگذاری تنظیمات:', error);
   }
 }
 
@@ -49,7 +50,7 @@ async function saveSettings() {
     await db.set('settings', settings);
     return true;
   } catch (error) {
-    console.error('Error saving settings:', error);
+    console.error('خطا در ذخیره تنظیمات:', error);
     return false;
   }
 }
@@ -59,46 +60,46 @@ const reactionEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];
 const commands = [
   new SlashCommandBuilder()
     .setName('setpollchannel')
-    .setDescription('Set poll channel')
+    .setDescription('تنظیم کانال نظرسنجی 📍')
     .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageChannels),
   new SlashCommandBuilder()
     .setName('setmoderatorrole')
-    .setDescription('Set moderator role')
+    .setDescription('تنظیم رول تأییدکننده 🛡️')
     .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageRoles)
     .addRoleOption(option =>
       option.setName('role')
-        .setDescription('Select moderator role')
+        .setDescription('رول تأییدکننده')
         .setRequired(true)),
   new SlashCommandBuilder()
     .setName('createpoll')
-    .setDescription('Create a new poll')
+    .setDescription('ساخت نظرسنجی جدید 📝')
     .addStringOption(option =>
       option.setName('question')
-        .setDescription('Poll question')
+        .setDescription('سوال نظرسنجی')
         .setRequired(true)
         .setMaxLength(256))
     .addStringOption(option =>
       option.setName('options')
-        .setDescription('Options separated by |')
+        .setDescription('گزینه‌ها (با | جدا کنید)')
         .setRequired(true))
     .addIntegerOption(option =>
       option.setName('duration')
-        .setDescription('Poll duration in hours')
+        .setDescription('مدت زمان (ساعت)')
         .setMinValue(1)
         .setMaxValue(168)),
   new SlashCommandBuilder()
     .setName('approvepoll')
-    .setDescription('Approve a pending poll')
+    .setDescription('تأیید نظرسنجی ✅')
     .addStringOption(option =>
       option.setName('pollid')
-        .setDescription('Poll ID')
+        .setDescription('آیدی نظرسنجی')
         .setRequired(true)),
   new SlashCommandBuilder()
     .setName('rejectpoll')
-    .setDescription('Reject a pending poll')
+    .setDescription('رد نظرسنجی ❌')
     .addStringOption(option =>
       option.setName('pollid')
-        .setDescription('Poll ID')
+        .setDescription('آیدی نظرسنجی')
         .setRequired(true))
 ];
 
@@ -106,9 +107,9 @@ async function registerCommands() {
   try {
     const rest = new REST({ version: '10' }).setToken(config.token);
     await rest.put(Routes.applicationCommands(config.clientId), { body: commands });
-    console.log('Commands registered successfully');
+    console.log('✅ دستورات با موفقیت ثبت شدند');
   } catch (error) {
-    console.error('Error registering commands:', error);
+    console.error('خطا در ثبت دستورات:', error);
   }
 }
 
@@ -119,7 +120,7 @@ function startPollChecker() {
         try {
           await endPoll(messageId);
         } catch (error) {
-          console.error('Error ending poll:', error);
+          console.error('خطا در پایان نظرسنجی:', error);
         }
       }
     }
@@ -130,35 +131,41 @@ async function endPoll(messageId) {
   const poll = config.activePolls.get(messageId);
   if (!poll) return;
 
-  const channel = await client.channels.fetch(config.pollChannel);
-  const message = await channel.messages.fetch(messageId);
-  const reactions = message.reactions.cache;
+  try {
+    const channel = await client.channels.fetch(config.pollChannel);
+    const message = await channel.messages.fetch(messageId);
+    const reactions = message.reactions.cache;
 
-  const results = poll.options.map((opt, i) => {
-    const reaction = reactions.get(reactionEmojis[i]);
-    const count = reaction ? reaction.count - 1 : 0;
-    return { option: opt, count };
-  });
+    const results = poll.options.map((opt, i) => {
+      const reaction = reactions.get(reactionEmojis[i]);
+      const count = reaction ? reaction.count - 1 : 0;
+      return { option: opt, count };
+    });
 
-  const totalVotes = results.reduce((sum, r) => sum + r.count, 0);
+    const totalVotes = results.reduce((sum, r) => sum + r.count, 0);
 
-  const embed = new EmbedBuilder()
-    .setColor(0xFF0000)
-    .setTitle('Poll Results')
-    .setDescription(
-      `Question: ${poll.question}\n\n` +
-      results.map((r, i) => `${reactionEmojis[i]} ${r.option}: ${r.count} votes (${totalVotes > 0 ? ((r.count/totalVotes)*100).toFixed(1) : 0}%)`).join('\n') +
-      `\n\nTotal votes: ${totalVotes}`
-    )
-    .setTimestamp();
+    const embed = new EmbedBuilder()
+      .setColor(0xFF0000)
+      .setTitle('📊 نتایج نظرسنجی')
+      .addFields(
+        { name: '❓ سوال', value: poll.question, inline: false },
+        { name: '📋 نتایج', value: results.map((r, i) => 
+          `${reactionEmojis[i]} ${r.option}: ${r.count} رأی (${totalVotes > 0 ? ((r.count/totalVotes)*100).toFixed(1) : 0}%)`
+        ).join('\n'), inline: false }
+      )
+      .setFooter({ text: `مجموع آرا: ${totalVotes} | نظرسنجی پایان یافت 🎉` })
+      .setTimestamp();
 
-  await channel.send({ embeds: [embed] });
-  config.activePolls.delete(messageId);
-  await saveSettings();
+    await channel.send({ embeds: [embed] });
+    config.activePolls.delete(messageId);
+    await saveSettings();
+  } catch (error) {
+    console.error('خطا در پایان نظرسنجی:', error);
+  }
 }
 
 client.once('ready', () => {
-  console.log(`Logged in as ${client.user.tag}`);
+  console.log(`🚀 ربات به عنوان ${client.user.tag} وارد شد 🎉`);
   initSettings().then(() => {
     registerCommands();
     startPollChecker();
@@ -168,25 +175,31 @@ client.once('ready', () => {
 client.on('interactionCreate', async interaction => {
   if (!interaction.isCommand()) return;
 
+  await interaction.deferReply({ flags: InteractionResponseFlags.Ephemeral });
+
   try {
     switch (interaction.commandName) {
       case 'setpollchannel':
         config.pollChannel = interaction.channelId;
         if (await saveSettings()) {
-          await interaction.reply({ content: 'Poll channel set', ephemeral: true });
+          await interaction.editReply({ content: '✅ کانال نظرسنجی با موفقیت تنظیم شد' });
+        } else {
+          await interaction.editReply({ content: '❌ خطا در تنظیم کانال' });
         }
         break;
 
       case 'setmoderatorrole':
         config.moderatorRole = interaction.options.getRole('role').id;
         if (await saveSettings()) {
-          await interaction.reply({ content: 'Moderator role set', ephemeral: true });
+          await interaction.editReply({ content: '✅ رول تأییدکننده با موفقیت تنظیم شد' });
+        } else {
+          await interaction.editReply({ content: '❌ خطا در تنظیم رول' });
         }
         break;
 
       case 'createpoll':
         if (!config.pollChannel || !config.moderatorRole) {
-          await interaction.reply({ content: 'Please set up poll channel and moderator role first', ephemeral: true });
+          await interaction.editReply({ content: '❌ لطفاً ابتدا کانال و رول را تنظیم کنید' });
           return;
         }
 
@@ -200,37 +213,56 @@ client.on('interactionCreate', async interaction => {
         };
 
         if (poll.options.length < 2 || poll.options.length > 5) {
-          await interaction.reply({ content: 'Poll must have 2-5 options', ephemeral: true });
+          await interaction.editReply({ content: '❌ نظرسنجی باید بین 2 تا 5 گزینه داشته باشد' });
           return;
         }
 
         config.pendingPolls.set(pollId, poll);
 
         const embed = new EmbedBuilder()
-          .setTitle('Pending Poll')
-          .setDescription(
-            `Question: ${poll.question}\n\n` +
-            poll.options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n')
+          .setTitle('📊 نظرسنجی جدید')
+          .addFields(
+            { name: '❓ سوال', value: poll.question, inline: false },
+            { name: '📋 گزینه‌ها', value: poll.options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n'), inline: false },
+            { name: '⏱️ مدت زمان', value: `${poll.duration / 3600000} ساعت`, inline: true },
+            { name: '🔑 شناسه', value: pollId, inline: true }
           )
-          .setFooter({ text: `Poll ID: ${pollId}` });
+          .setFooter({ text: 'در انتظار تأیید مدیران...' })
+          .setTimestamp();
 
-        await interaction.reply({ embeds: [embed] });
+        const message = await interaction.channel.send({ 
+          content: `<@&${config.moderatorRole}> یک نظرسنجی جدید نیاز به تأیید دارد! 🔔`,
+          embeds: [embed]
+        });
+
+        for (const emoji of reactionEmojis.slice(0, poll.options.length)) {
+          await message.react(emoji);
+        }
+
+        await interaction.editReply({ content: '✅ نظرسنجی شما ایجاد و در انتظار تأیید است' });
         break;
 
       case 'approvepoll':
+        if (!interaction.member.roles.cache.has(config.moderatorRole)) {
+          await interaction.editReply({ content: '❌ شما دسترسی تأیید نظرسنجی را ندارید' });
+          return;
+        }
+
         const pollToApprove = config.pendingPolls.get(interaction.options.getString('pollid'));
         if (!pollToApprove) {
-          await interaction.reply({ content: 'Poll not found', ephemeral: true });
+          await interaction.editReply({ content: '❌ نظرسنجی مورد نظر یافت نشد' });
           return;
         }
 
         const channel = await client.channels.fetch(config.pollChannel);
         const pollEmbed = new EmbedBuilder()
-          .setTitle('Active Poll')
-          .setDescription(
-            `Question: ${pollToApprove.question}\n\n` +
-            pollToApprove.options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n')
-          );
+          .setTitle('📊 نظرسنجی فعال')
+          .addFields(
+            { name: '❓ سوال', value: pollToApprove.question, inline: false },
+            { name: '📋 گزینه‌ها', value: pollToApprove.options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n'), inline: false },
+            { name: '⏱️ زمان باقیمانده', value: `<t:${Math.floor(pollToApprove.endTime / 1000)}:R>`, inline: true }
+          )
+          .setTimestamp();
 
         const msg = await channel.send({ embeds: [pollEmbed] });
         for (const emoji of reactionEmojis.slice(0, pollToApprove.options.length)) {
@@ -241,17 +273,31 @@ client.on('interactionCreate', async interaction => {
         config.pendingPolls.delete(interaction.options.getString('pollid'));
         await saveSettings();
 
-        await interaction.reply({ content: 'Poll approved', ephemeral: true });
+        await interaction.editReply({ content: '✅ نظرسنجی با موفقیت تأیید شد' });
         break;
 
       case 'rejectpoll':
+        if (!interaction.member.roles.cache.has(config.moderatorRole)) {
+          await interaction.editReply({ content: '❌ شما دسترسی رد نظرسنجی را ندارید' });
+          return;
+        }
+
+        if (!config.pendingPolls.has(interaction.options.getString('pollid'))) {
+          await interaction.editReply({ content: '❌ نظرسنجی مورد نظر یافت نشد' });
+          return;
+        }
+
         config.pendingPolls.delete(interaction.options.getString('pollid'));
-        await interaction.reply({ content: 'Poll rejected', ephemeral: true });
+        await interaction.editReply({ content: '✅ نظرسنجی با موفقیت رد شد' });
         break;
     }
   } catch (error) {
-    console.error('Command error:', error);
-    await interaction.reply({ content: 'An error occurred', ephemeral: true }).catch(console.error);
+    console.error('خطا در اجرای دستور:', error);
+    try {
+      await interaction.editReply({ content: '❌ خطایی رخ داد' });
+    } catch (err) {
+      console.error('خطا در ارسال پیام خطا:', err);
+    }
   }
 });
 
