@@ -120,12 +120,22 @@ async function registerCommands() {
 function startPollChecker() {
   setInterval(async () => {
     for (const [messageId, poll] of config.activePolls.entries()) {
-      if (Date.now() >= poll.endTime) {
-        try {
+      try {
+        if (Date.now() >= poll.endTime) {
           await endPoll(messageId);
-        } catch (error) {
-          console.error('Error ending poll:', error);
+        } else {
+          const channel = await client.channels.fetch(config.pollChannel);
+          const message = await channel.messages.fetch(messageId);
+          const embed = message.embeds[0];
+          const remainingTime = Math.floor((poll.endTime - Date.now()) / 60000);
+          
+          const updatedEmbed = new EmbedBuilder(embed.data)
+            .spliceFields(2, 1, { name: '⏱️ زمان باقیمانده', value: `${remainingTime} دقیقه`, inline: true });
+          
+          await message.edit({ embeds: [updatedEmbed] });
         }
+      } catch (error) {
+        console.error('Error updating poll:', error);
       }
     }
   }, 60000);
@@ -264,7 +274,7 @@ client.on('interactionCreate', async interaction => {
           .addFields(
             { name: '❓ سوال', value: pollToApprove.question, inline: false },
             { name: '📋 گزینه‌ها', value: pollToApprove.options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n'), inline: false },
-            { name: '⏱️ زمان باقیمانده', value: `<t:${Math.floor(pollToApprove.endTime / 1000)}:R>`, inline: true }
+            { name: '⏱️ زمان باقیمانده', value: `${Math.floor((pollToApprove.endTime - Date.now()) / 60000)} دقیقه`, inline: true }
           )
           .setFooter({ text: pollToApprove.anonymous ? 'نظرسنجی ناشناس 🔒' : `ایجاد شده توسط ${pollToApprove.creatorName}` })
           .setTimestamp();
