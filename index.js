@@ -115,21 +115,7 @@ const commands = [
     .addBooleanOption(option =>
       option.setName('anonymous')
         .setDescription('حالت ناشناس')
-        .setRequired(false)),
-  new SlashCommandBuilder()
-    .setName('approvepoll')
-    .setDescription('تأیید نظرسنجی ✅')
-    .addStringOption(option =>
-      option.setName('pollid')
-        .setDescription('شناسه نظرسنجی')
-        .setRequired(true)),
-  new SlashCommandBuilder()
-    .setName('rejectpoll')
-    .setDescription('رد نظرسنجی ❌')
-    .addStringOption(option =>
-      option.setName('pollid')
-        .setDescription('شناسه نظرسنجی')
-        .setRequired(true))
+        .setRequired(false))
 ];
 
 async function registerCommands() {
