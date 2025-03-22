@@ -1,0 +1,590 @@
+خیلی خوبه که کد نهایی رو برام فرستادی! می‌خوای ربات نظرسنجی رو تا جایی که ممکنه خفن و شیک کنم، مخصوصاً ظاهر embedها رو جذاب‌تر کنم و کامند `/ping` رو اصلاح کنم تا فقط پینگ خود ربات رو نشون بده (بدون پینگ API). بیایم این کار رو قدم‌به‌قدم انجام بدیم و یه سری بهبودهای بصری و کاربردی به ربات اضافه کنیم. 🚀
+
+---
+
+### 📋 تغییرات پیشنهادی برای خفن‌تر کردن ربات
+
+#### 1. **بهبود ظاهر Embedها**
+برای اینکه embedها شیک‌تر و جذاب‌تر بشن:
+- **رنگ‌های جذاب‌تر**: از رنگ‌های متنوع‌تر برای embedهای مختلف استفاده می‌کنیم (مثلاً سبز برای تأیید، قرمز برای رد، نارنجی برای در انتظار).
+- **ایموج‌های بیشتر**: ایموجی‌های مرتبط و جذاب به هر بخش اضافه می‌کنیم.
+- **فونت و ساختار بهتر**: از بولد کردن و فاصله‌گذاری بهتر توی فیلدها استفاده می‌کنیم.
+- **فوتر و Thumbnail**: یه فوتر با اطلاعات بیشتر و یه تصویر کوچک (thumbnail) برای جذابیت بصری اضافه می‌کنیم.
+
+#### 2. **اصلاح کامند `/ping`**
+- الان `/ping` هم پینگ API (`client.ws.ping`) و هم تاخیر ربات (`Date.now() - interaction.createdTimestamp`) رو نشون می‌ده.
+- می‌خوای فقط پینگ خود ربات رو نشون بده، پس فقط `client.ws.ping` رو نگه می‌داریم.
+- ظاهر embed رو هم شیک‌تر می‌کنیم.
+
+#### 3. **اضافه کردن قابلیت‌های خفن به نظرسنجی**
+- **پیش‌نمایش زمان واقعی**: توی نظرسنجی‌های فعال، زمان باقی‌مونده رو به صورت داینامیک با فرمت `<t:timestamp:R>` نشون بدیم.
+- **حالت ناشناس بهتر**: توی embedها، اگه نظرسنجی ناشناس باشه، یه قفل 🔒 کنار عنوان اضافه کنیم.
+- **اعلان بهتر برای مدیران**: توی پیام‌های در انتظار تأیید، یه دکمه برای تأیید و رد سریع اضافه کنیم (با استفاده از `ActionRowBuilder` و `ButtonBuilder`).
+- **مدیریت بهتر رأی‌ها**: یه سیستم ساده برای جلوگیری از رأی دادن چندباره (حتی اگه چند رأی غیرفعال باشه) اضافه کنیم.
+
+#### 4. **بهینه‌سازی کد**
+- **مدیریت خطاها**: مدیریت خطاها رو بهتر کنیم تا کاربر تجربه بهتری داشته باشه.
+- **ساختار تمیزتر**: یه سری متغیرهای ثابت (مثل رنگ‌ها و ایموجی‌ها) رو جدا کنیم تا کد خواناتر بشه.
+
+---
+
+### 📦 تغییرات در کد
+
+#### 1. **تعریف متغیرهای ثابت برای رنگ‌ها و ایموجی‌ها**
+برای اینکه کد تمیزتر بشه و ظاهر embedها یکپارچه باشه، یه سری متغیر ثابت تعریف می‌کنیم:
+```javascript
+const COLORS = {
+  SUCCESS: 0x00FF00, // سبز برای موفقیت
+  ERROR: 0xFF0000, // قرمز برای خطا
+  PENDING: 0xFFA500, // نارنجی برای در انتظار
+  ACTIVE: 0x1E90FF, // آبی برای نظرسنجی فعال
+  PING: 0x32CD32 // سبز لیمویی برای پینگ
+};
+
+const EMOJIS = {
+  SUCCESS: '✅',
+  ERROR: '❌',
+  QUESTION: '❓',
+  OPTIONS: '📋',
+  DURATION: '⏱️',
+  ID: '🔑',
+  ANONYMOUS: '🔒',
+  TIME_REMAINING: '⏳',
+  TOTAL_VOTES: '📊'
+};
+```
+
+#### 2. **اصلاح کامند `/ping`**
+فقط پینگ ربات (`client.ws.ping`) رو نشون می‌دیم و ظاهر embed رو جذاب‌تر می‌کنیم:
+```javascript
+case 'ping':
+  const botPing = client.ws.ping;
+  const pingEmbed = new EmbedBuilder()
+    .setTitle('🏓 پونگ!')
+    .setColor(COLORS.PING)
+    .setDescription('وضعیت اتصال ربات رو چک کن! 🚀')
+    .addFields(
+      { name: '📡 **پینگ ربات**', value: `${botPing}ms`, inline: true }
+    )
+    .setThumbnail(client.user.displayAvatarURL())
+    .setFooter({ text: `درخواست توسط ${interaction.user.tag} | وضعیت: 🟢 آنلاین` })
+    .setTimestamp();
+  await interaction.editReply({ embeds: [pingEmbed], ephemeral: false });
+  break;
+```
+
+#### 3. **بهبود ظاهر Embedها و اضافه کردن دکمه‌ها**
+- **برای `/createpoll` (Pending Poll)**:
+  رنگ نارنجی، ایموجی‌های بیشتر، و دکمه‌های تأیید و رد اضافه می‌کنیم.
+- **برای `/approvepoll` (Active Poll)**:
+  رنگ آبی، نمایش زمان باقی‌مونده با فرمت Discord، و ظاهر شیک‌تر.
+- **برای `endPoll` (Poll Results)**:
+  رنگ قرمز، نمایش درصد رأی‌ها با نوار پیشرفت ساده.
+
+**اضافه کردن دکمه‌ها**:
+برای این کار، باید `ActionRowBuilder` و `ButtonBuilder` رو از `discord.js` وارد کنیم:
+```javascript
+const { Client, GatewayIntentBits, SlashCommandBuilder, EmbedBuilder, PermissionsBitField, REST, Routes, InteractionResponseFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+```
+
+#### 4. **مدیریت رأی‌ها**
+یه سیستم ساده برای مدیریت رأی‌ها اضافه می‌کنیم تا هر کاربر فقط بتونه یه بار رأی بده (حتی اگه چند رأی غیرفعال باشه).
+
+---
+
+### 📦 کد نهایی اصلاح‌شده
+
+```javascript
+const { Client, GatewayIntentBits, SlashCommandBuilder, EmbedBuilder, PermissionsBitField, REST, Routes, InteractionResponseFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { QuickDB } = require('quick.db');
+require('dotenv').config();
+
+const db = new QuickDB();
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMessageReactions,
+    GatewayIntentBits.GuildMembers
+  ]
+});
+
+const COLORS = {
+  SUCCESS: 0x00FF00,
+  ERROR: 0xFF0000,
+  PENDING: 0xFFA500,
+  ACTIVE: 0x1E90FF,
+  PING: 0x32CD32
+};
+
+const EMOJIS = {
+  SUCCESS: '✅',
+  ERROR: '❌',
+  QUESTION: '❓',
+  OPTIONS: '📋',
+  DURATION: '⏱️',
+  ID: '🔑',
+  ANONYMOUS: '🔒',
+  TIME_REMAINING: '⏳',
+  TOTAL_VOTES: '📊'
+};
+
+const config = {
+  token: process.env.TOKEN,
+  clientId: process.env.CLIENT_ID,
+  pollChannel: null,
+  moderatorRole: null,
+  pendingPolls: new Map(),
+  activePolls: new Map()
+};
+
+if (!config.token || !config.clientId) {
+  console.error('Error: Missing environment variables!');
+  process.exit(1);
+}
+
+async function initSettings() {
+  try {
+    const settings = await db.get('settings') || {};
+    config.pollChannel = settings.pollChannel || null;
+    config.moderatorRole = settings.moderatorRole || null;
+    const activePollsData = settings.activePolls || [];
+    config.activePolls = new Map(activePollsData.map(([key, value]) => {
+      return [key, { ...value, voters: new Map(value.voters || []) }];
+    }));
+    console.log('Settings loaded successfully');
+  } catch (error) {
+    console.error('Error loading settings:', error);
+  }
+}
+
+async function saveSettings() {
+  try {
+    const settings = {
+      pollChannel: config.pollChannel,
+      moderatorRole: config.moderatorRole,
+      activePolls: Array.from(config.activePolls.entries()).map(([key, value]) => {
+        return [key, { ...value, voters: Array.from(value.voters.entries()) }];
+      })
+    };
+    await db.set('settings', settings);
+    return true;
+  } catch (error) {
+    console.error('Error saving settings:', error);
+    return false;
+  }
+}
+
+const reactionEmojis = ['1️⃣', '2️⃣', '3️⃣', '4️⃣', '5️⃣'];
+
+const commands = [
+  new SlashCommandBuilder()
+    .setName('ping')
+    .setDescription('نمایش وضعیت ربات 🏓'),
+  new SlashCommandBuilder()
+    .setName('setpollchannel')
+    .setDescription('تنظیم کانال نظرسنجی 📍')
+    .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageChannels),
+  new SlashCommandBuilder()
+    .setName('setmoderatorrole')
+    .setDescription('تنظیم رول تأییدکننده 🛡️')
+    .setDefaultMemberPermissions(PermissionsBitField.Flags.ManageRoles)
+    .addRoleOption(option =>
+      option.setName('role')
+        .setDescription('رول تأییدکننده')
+        .setRequired(true)),
+  new SlashCommandBuilder()
+    .setName('createpoll')
+    .setDescription('ساخت نظرسنجی جدید 📝')
+    .addStringOption(option =>
+      option.setName('question')
+        .setDescription('سوال نظرسنجی')
+        .setRequired(true)
+        .setMaxLength(256))
+    .addStringOption(option =>
+      option.setName('options')
+        .setDescription('گزینه‌ها (با | جدا کنید)')
+        .setRequired(true))
+    .addIntegerOption(option =>
+      option.setName('duration')
+        .setDescription('مدت زمان (ساعت)')
+        .setMinValue(1)
+        .setMaxValue(168))
+    .addBooleanOption(option =>
+      option.setName('anonymous')
+        .setDescription('حالت ناشناس')
+        .setRequired(false)),
+  new SlashCommandBuilder()
+    .setName('approvepoll')
+    .setDescription('تأیید نظرسنجی ✅')
+    .addStringOption(option =>
+      option.setName('pollid')
+        .setDescription('آیدی نظرسنجی')
+        .setRequired(true)),
+  new SlashCommandBuilder()
+    .setName('rejectpoll')
+    .setDescription('رد نظرسنجی ❌')
+    .addStringOption(option =>
+      option.setName('pollid')
+        .setDescription('آیدی نظرسنجی')
+        .setRequired(true))
+];
+
+async function registerCommands() {
+  try {
+    const rest = new REST({ version: '10' }).setToken(config.token);
+    await rest.put(Routes.applicationCommands(config.clientId), { body: commands });
+    console.log('Commands registered successfully');
+  } catch (error) {
+    console.error('Error registering commands:', error);
+  }
+}
+
+function startPollChecker() {
+  setInterval(async () => {
+    for (const [messageId, poll] of config.activePolls.entries()) {
+      try {
+        if (Date.now() >= poll.endTime) {
+          await endPoll(messageId);
+        } else {
+          const channel = await client.channels.fetch(config.pollChannel);
+          const message = await channel.messages.fetch(messageId);
+          const embed = message.embeds[0];
+          
+          const updatedEmbed = new EmbedBuilder(embed.data)
+            .spliceFields(2, 1, { 
+              name: `${EMOJIS.TIME_REMAINING} **زمان باقیمانده**`, 
+              value: `<t:${Math.floor(poll.endTime / 1000)}:R>`, 
+              inline: true 
+            });
+          
+          await message.edit({ embeds: [updatedEmbed] });
+        }
+      } catch (error) {
+        console.error('Error updating poll:', error);
+      }
+    }
+  }, 60000);
+}
+
+async function endPoll(messageId) {
+  const poll = config.activePolls.get(messageId);
+  if (!poll) return;
+
+  try {
+    const channel = await client.channels.fetch(config.pollChannel);
+    const message = await channel.messages.fetch(messageId);
+    const reactions = message.reactions.cache;
+
+    const results = poll.options.map((opt, i) => {
+      const reaction = reactions.get(reactionEmojis[i]);
+      const count = reaction ? reaction.count - 1 : 0;
+      return { option: opt, count };
+    });
+
+    const totalVotes = results.reduce((sum, r) => sum + r.count, 0);
+    const maxVotes = Math.max(...results.map(r => r.count), 1);
+
+    const embed = new EmbedBuilder()
+      .setColor(COLORS.ERROR)
+      .setTitle('📊 نتایج نظرسنجی')
+      .addFields(
+        { name: `${EMOJIS.QUESTION} **سوال**`, value: poll.question, inline: false },
+        { name: `${EMOJIS.OPTIONS} **نتایج**`, value: results.map((r, i) => {
+          const percentage = totalVotes > 0 ? (r.count / totalVotes) * 100 : 0;
+          const barLength = Math.round((r.count / maxVotes) * 10);
+          const bar = '█'.repeat(barLength) + '▁'.repeat(10 - barLength);
+          return `${reactionEmojis[i]} ${r.option}: **${r.count} رأی** (${percentage.toFixed(1)}%)\n${bar}`;
+        }).join('\n\n'), inline: false },
+        { name: `${EMOJIS.TOTAL_VOTES} **مجموع آرا**`, value: `${totalVotes}`, inline: true },
+        { name: `${EMOJIS.ANONYMOUS} **ناشناس**`, value: poll.anonymous ? 'بله ✅' : 'خیر ❌', inline: true }
+      )
+      .setThumbnail(client.user.displayAvatarURL())
+      .setFooter({ text: poll.anonymous ? 'نظرسنجی ناشناس 🔒 | پایان یافت!' : `ایجاد شده توسط ${poll.creatorName} | پایان یافت!` })
+      .setTimestamp();
+
+    await channel.send({ embeds: [embed] });
+    config.activePolls.delete(messageId);
+    await saveSettings();
+  } catch (error) {
+    console.error('Error in endPoll:', error);
+  }
+}
+
+client.once('ready', () => {
+  console.log(`Bot logged in as ${client.user.tag}`);
+  initSettings().then(() => {
+    registerCommands();
+    startPollChecker();
+  });
+});
+
+client.on('interactionCreate', async interaction => {
+  if (!interaction.isCommand() && !interaction.isButton()) return;
+
+  if (interaction.isCommand()) {
+    await interaction.deferReply({ ephemeral: true });
+
+    try {
+      switch (interaction.commandName) {
+        case 'ping':
+          const botPing = client.ws.ping;
+          const pingEmbed = new EmbedBuilder()
+            .setTitle('🏓 پونگ!')
+            .setColor(COLORS.PING)
+            .setDescription('وضعیت اتصال ربات رو چک کن! 🚀')
+            .addFields(
+              { name: '📡 **پینگ ربات**', value: `${botPing}ms`, inline: true }
+            )
+            .setThumbnail(client.user.displayAvatarURL())
+            .setFooter({ text: `درخواست توسط ${interaction.user.tag} | وضعیت: 🟢 آنلاین` })
+            .setTimestamp();
+          await interaction.editReply({ embeds: [pingEmbed], ephemeral: false });
+          break;
+
+        case 'setpollchannel':
+          config.pollChannel = interaction.channelId;
+          if (await saveSettings()) {
+            await interaction.editReply({ content: `${EMOJIS.SUCCESS} **کانال نظرسنجی تنظیم شد** | <#${config.pollChannel}>` });
+          } else {
+            await interaction.editReply({ content: `${EMOJIS.ERROR} **خطا در تنظیم کانال**` });
+          }
+          break;
+
+        case 'setmoderatorrole':
+          config.moderatorRole = interaction.options.getRole('role').id;
+          if (await saveSettings()) {
+            await interaction.editReply({ content: `${EMOJIS.SUCCESS} **رول تأییدکننده تنظیم شد** | <@&${config.moderatorRole}>` });
+          } else {
+            await interaction.editReply({ content: `${EMOJIS.ERROR} **خطا در تنظیم رول**` });
+          }
+          break;
+
+        case 'createpoll':
+          if (!config.pollChannel || !config.moderatorRole) {
+            await interaction.editReply({ content: `${EMOJIS.ERROR} **لطفاً ابتدا کانال و رول را تنظیم کنید**` });
+            return;
+          }
+
+          const pollId = Date.now().toString();
+          const poll = {
+            question: interaction.options.getString('question'),
+            options: interaction.options.getString('options').split('|').map(o => o.trim()),
+            duration: (interaction.options.getInteger('duration') || 24) * 3600000,
+            creator: interaction.user.id,
+            creatorName: interaction.user.username,
+            endTime: Date.now() + ((interaction.options.getInteger('duration') || 24) * 3600000),
+            anonymous: interaction.options.getBoolean('anonymous') || false,
+            voters: new Map()
+          };
+
+          if (poll.options.length < 2 || poll.options.length > 5) {
+            await interaction.editReply({ content: `${EMOJIS.ERROR} **نظرسنجی باید بین 2 تا 5 گزینه داشته باشد**` });
+            return;
+          }
+
+          config.pendingPolls.set(pollId, poll);
+
+          const embed = new EmbedBuilder()
+            .setTitle(`${poll.anonymous ? '🔒 ' : ''}📊 نظرسنجی در انتظار تأیید`)
+            .setColor(COLORS.PENDING)
+            .addFields(
+              { name: `${EMOJIS.QUESTION} **سوال**`, value: poll.question, inline: false },
+              { name: `${EMOJIS.OPTIONS} **گزینه‌ها**`, value: poll.options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n'), inline: false },
+              { name: `${EMOJIS.DURATION} **مدت زمان**`, value: `${poll.duration / 3600000} ساعت`, inline: true },
+              { name: `${EMOJIS.ANONYMOUS} **ناشناس**`, value: poll.anonymous ? 'بله ✅' : 'خیر ❌', inline: true },
+              { name: `${EMOJIS.ID} **شناسه**`, value: pollId, inline: true }
+            )
+            .setThumbnail(client.user.displayAvatarURL())
+            .setFooter({ text: poll.anonymous ? 'نظرسنجی ناشناس 🔒 | در انتظار تأیید' : `ایجاد شده توسط ${poll.creatorName} | در انتظار تأیید` })
+            .setTimestamp();
+
+          const actionRow = new ActionRowBuilder()
+            .addComponents(
+              new ButtonBuilder()
+                .setCustomId(`approve_${pollId}`)
+                .setLabel('تأیید')
+                .setStyle(ButtonStyle.Success)
+                .setEmoji('✅'),
+              new ButtonBuilder()
+                .setCustomId(`reject_${pollId}`)
+                .setLabel('رد')
+                .setStyle(ButtonStyle.Danger)
+                .setEmoji('❌')
+            );
+
+          await interaction.editReply({ content: `${EMOJIS.SUCCESS} **نظرسنجی شما ایجاد و در انتظار تأیید است**` });
+          const message = await interaction.channel.send({ 
+            content: `<@&${config.moderatorRole}> یک نظرسنجی جدید نیاز به تأیید دارد! 🚨`,
+            embeds: [embed],
+            components: [actionRow]
+          });
+
+          for (const emoji of reactionEmojis.slice(0, poll.options.length)) {
+            await message.react(emoji);
+          }
+          break;
+
+        case 'approvepoll':
+          if (!interaction.member.roles.cache.has(config.moderatorRole)) {
+            await interaction.editReply({ content: `${EMOJIS.ERROR} **شما دسترسی تأیید نظرسنجی را ندارید**` });
+            return;
+          }
+
+          const pollToApprove = config.pendingPolls.get(interaction.options.getString('pollid'));
+          if (!pollToApprove) {
+            await interaction.editReply({ content: `${EMOJIS.ERROR} **نظرسنجی مورد نظر یافت نشد**` });
+            return;
+          }
+
+          const channel = await client.channels.fetch(config.pollChannel);
+          const pollEmbed = new EmbedBuilder()
+            .setTitle(`${pollToApprove.anonymous ? '🔒 ' : ''}📊 نظرسنجی فعال`)
+            .setColor(COLORS.ACTIVE)
+            .addFields(
+              { name: `${EMOJIS.QUESTION} **سوال**`, value: pollToApprove.question, inline: false },
+              { name: `${EMOJIS.OPTIONS} **گزینه‌ها**`, value: pollToApprove.options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n'), inline: false },
+              { name: `${EMOJIS.TIME_REMAINING} **زمان باقیمانده**`, value: `<t:${Math.floor(pollToApprove.endTime / 1000)}:R>`, inline: true },
+              { name: `${EMOJIS.ANONYMOUS} **ناشناس**`, value: pollToApprove.anonymous ? 'بله ✅' : 'خیر ❌', inline: true }
+            )
+            .setThumbnail(client.user.displayAvatarURL())
+            .setFooter({ text: pollToApprove.anonymous ? 'نظرسنجی ناشناس 🔒 | فعال' : `ایجاد شده توسط ${pollToApprove.creatorName} | فعال` })
+            .setTimestamp();
+
+          const msg = await channel.send({ embeds: [pollEmbed] });
+          for (const emoji of reactionEmojis.slice(0, pollToApprove.options.length)) {
+            await msg.react(emoji);
+          }
+
+          config.activePolls.set(msg.id, pollToApprove);
+          config.pendingPolls.delete(interaction.options.getString('pollid'));
+          await saveSettings();
+
+          await interaction.editReply({ content: `${EMOJIS.SUCCESS} **نظرسنجی با موفقیت تأیید شد**` });
+          break;
+
+        case 'rejectpoll':
+          if (!interaction.member.roles.cache.has(config.moderatorRole)) {
+            await interaction.editReply({ content: `${EMOJIS.ERROR} **شما دسترسی رد نظرسنجی را ندارید**` });
+            return;
+          }
+
+          if (config.pendingPolls.delete(interaction.options.getString('pollid'))) {
+            await interaction.editReply({ content: `${EMOJIS.SUCCESS} **نظرسنجی با موفقیت رد شد**` });
+          } else {
+            await interaction.editReply({ content: `${EMOJIS.ERROR} **نظرسنجی مورد نظر یافت نشد**` });
+          }
+          break;
+      }
+    } catch (error) {
+      console.error('Error in command:', error);
+      await interaction.editReply({ content: `${EMOJIS.ERROR} **خطایی رخ داد**` }).catch(console.error);
+    }
+  } else if (interaction.isButton()) {
+    if (!interaction.member.roles.cache.has(config.moderatorRole)) {
+      await interaction.reply({ content: `${EMOJIS.ERROR} **شما دسترسی لازم برای این کار را ندارید**`, ephemeral: true });
+      return;
+    }
+
+    const [action, pollId] = interaction.customId.split('_');
+    const poll = config.pendingPolls.get(pollId);
+    if (!poll) {
+      await interaction.reply({ content: `${EMOJIS.ERROR} **نظرسنجی مورد نظر یافت نشد**`, ephemeral: true });
+      return;
+    }
+
+    if (action === 'approve') {
+      const channel = await client.channels.fetch(config.pollChannel);
+      const pollEmbed = new EmbedBuilder()
+        .setTitle(`${poll.anonymous ? '🔒 ' : ''}📊 نظرسنجی فعال`)
+        .setColor(COLORS.ACTIVE)
+        .addFields(
+          { name: `${EMOJIS.QUESTION} **سوال**`, value: poll.question, inline: false },
+          { name: `${EMOJIS.OPTIONS} **گزینه‌ها**`, value: poll.options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n'), inline: false },
+          { name: `${EMOJIS.TIME_REMAINING} **زمان باقیمانده**`, value: `<t:${Math.floor(poll.endTime / 1000)}:R>`, inline: true },
+          { name: `${EMOJIS.ANONYMOUS} **ناشناس**`, value: poll.anonymous ? 'بله ✅' : 'خیر ❌', inline: true }
+        )
+        .setThumbnail(client.user.displayAvatarURL())
+        .setFooter({ text: poll.anonymous ? 'نظرسنجی ناشناس 🔒 | فعال' : `ایجاد شده توسط ${poll.creatorName} | فعال` })
+        .setTimestamp();
+
+      const msg = await channel.send({ embeds: [pollEmbed] });
+      for (const emoji of reactionEmojis.slice(0, poll.options.length)) {
+        await msg.react(emoji);
+      }
+
+      config.activePolls.set(msg.id, poll);
+      config.pendingPolls.delete(pollId);
+      await saveSettings();
+
+      await interaction.update({ content: `${EMOJIS.SUCCESS} **نظرسنجی با موفقیت تأیید شد**`, embeds: [], components: [] });
+    } else if (action === 'reject') {
+      config.pendingPolls.delete(pollId);
+      await interaction.update({ content: `${EMOJIS.SUCCESS} **نظرسنجی با موفقیت رد شد**`, embeds: [], components: [] });
+    }
+  }
+});
+
+client.on('messageReactionAdd', async (reaction, user) => {
+  if (user.bot) return;
+
+  const poll = config.activePolls.get(reaction.message.id);
+  if (!poll) return;
+
+  const emoji = reaction.emoji.name;
+  const validIndex = reactionEmojis.indexOf(emoji);
+
+  if (validIndex === -1 || validIndex >= poll.options.length) {
+    await reaction.users.remove(user);
+    return;
+  }
+
+  if (poll.voters.has(user.id)) {
+    await reaction.users.remove(user);
+    await reaction.message.channel.send({ content: `<@${user.id}> ${EMOJIS.ERROR} **شما قبلاً رأی داده‌اید**` });
+    return;
+  }
+
+  poll.voters.set(user.id, validIndex);
+});
+
+client.on('messageReactionRemove', async (reaction, user) => {
+  if (user.bot) return;
+
+  const poll = config.activePolls.get(reaction.message.id);
+  if (!poll) return;
+
+  const emoji = reaction.emoji.name;
+  const validIndex = reactionEmojis.indexOf(emoji);
+
+  if (validIndex === -1 || validIndex >= poll.options.length) return;
+
+  if (poll.voters.get(user.id) === validIndex) {
+    poll.voters.delete(user.id);
+  }
+});
+
+client.login(config.token).catch(console.error);
+```
+
+---
+
+### 🚀 نتیجه نهایی
+با این تغییرات، ربات خیلی خفن‌تر و شیک‌تر شده:
+- **کامند `/ping`**:
+  - فقط پینگ ربات رو نشون می‌ده (`client.ws.ping`).
+  - ظاهر embed با رنگ سبز لیمویی، thumbnail آواتار ربات، و فوتر جذاب طراحی شده.
+- **Embedهای نظرسنجی**:
+  - رنگ‌های متنوع (نارنجی برای در انتظار، آبی برای فعال، قرمز برای نتایج).
+  - ایموجی‌های جذاب و ساختار منظم‌تر.
+  - نمایش زمان باقی‌مونده با فرمت Discord (`<t:timestamp:R>`).
+  - اضافه شدن نوار پیشرفت ساده توی نتایج نظرسنجی.
+- **دکمه‌ها**:
+  - برای نظرسنجی‌های در انتظار، دکمه‌های تأیید و رد اضافه شده که مدیران می‌تونن باهاشون سریع عمل کنن.
+- **مدیریت رأی‌ها**:
+  - هر کاربر فقط می‌تونه یه بار رأی بده و اگه بخواد دوباره رأی بده، پیام خطا می‌گیره.
+
+این کد رو توی Replit اجرا کن، باید همه‌چیز خیلی شیک و حرفه‌ای کار کنه. اگه بازم می‌خوای تغییر یا قابلیت جدیدی اضافه کنی، بگو تا برات درست کنم! 😊
+
+**موفق باشی!** 🌟
