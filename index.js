@@ -466,29 +466,47 @@ client.on('interactionCreate', async interaction => {
 });
 
 client.on('messageReactionAdd', async (reaction, user) => {
-  if (user.bot) return;
+  try {
+    if (user.bot) return;
 
-  const poll = config.activePolls.get(reaction.message.id);
-  if (!poll) return;
+    const poll = config.activePolls.get(reaction.message.id);
+    if (!poll) return;
 
-  const emoji = reaction.emoji.name;
-  if (!reactionEmojis.includes(emoji)) {
-    await reaction.users.remove(user);
-    return;
-  }
+    // Fetch fresh reaction data
+    const fullReaction = await reaction.fetch();
+    const emoji = fullReaction.emoji.name;
 
-  // Check for duplicate votes
-  if (poll.voters.has(user.id)) {
-    const previousVote = poll.voters.get(user.id);
-    if (previousVote !== emoji) {
-      const prevReaction = reaction.message.reactions.cache.get(previousVote);
-      if (prevReaction) await prevReaction.users.remove(user);
+    // Remove unauthorized emoji immediately
+    if (!reactionEmojis.includes(emoji)) {
+      await fullReaction.users.remove(user.id);
+      
+      // Clean up any other unauthorized reactions
+      const message = await fullReaction.message.fetch();
+      const reactions = message.reactions.cache;
+      
+      for (const [_, reaction] of reactions) {
+        if (!reactionEmojis.includes(reaction.emoji.name)) {
+          await reaction.remove();
+        }
+      }
+      return;
+    }
+
+    // Handle valid vote
+    if (poll.voters.has(user.id)) {
+      const previousVote = poll.voters.get(user.id);
+      if (previousVote !== emoji) {
+        const prevReaction = fullReaction.message.reactions.cache.get(previousVote);
+        if (prevReaction) await prevReaction.users.remove(user.id);
+        poll.voters.set(user.id, emoji);
+      }
+    } else {
       poll.voters.set(user.id, emoji);
     }
-  } else {
-    poll.voters.set(user.id, emoji);
+    await saveSettings();
+  } catch (error) {
+    console.error('Error handling reaction:', error);
   }
-  await saveSettings();
 });
 
 client.on('messageReactionRemove', async (reaction, user) => {
