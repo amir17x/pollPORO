@@ -437,6 +437,19 @@ client.on('interactionCreate', async interaction => {
     } else if (action === 'reject') {
       config.pendingPolls.delete(pollId);
       
+      // Notify poll creator about rejection
+      try {
+        const creator = await client.users.fetch(poll.creator);
+        const notifyEmbed = new EmbedBuilder()
+          .setColor(COLORS.ERROR)
+          .setTitle(`${EMOJIS.ERROR} نظرسنجی شما رد شد`)
+          .setDescription(`نظرسنجی شما با موضوع "${poll.question}" توسط مدیران رد شد.`)
+          .setTimestamp();
+        await creator.send({ embeds: [notifyEmbed] });
+      } catch (error) {
+        console.error('Could not notify poll creator about rejection:', error);
+      }
+      
       const updatedEmbed = new EmbedBuilder()
         .setTitle('❌ نظرسنجی رد شد')
         .setColor(COLORS.ERROR)
@@ -476,6 +489,22 @@ client.on('messageReactionAdd', async (reaction, user) => {
     poll.voters.set(user.id, emoji);
   }
   await saveSettings();
+});
+
+client.on('messageReactionRemove', async (reaction, user) => {
+  if (user.bot) return;
+
+  const poll = config.activePolls.get(reaction.message.id);
+  if (!poll) return;
+
+  const emoji = reaction.emoji.name;
+  if (!reactionEmojis.includes(emoji)) return;
+
+  // If this was the user's vote, remove it from voters
+  if (poll.voters.has(user.id) && poll.voters.get(user.id) === emoji) {
+    poll.voters.delete(user.id);
+    await saveSettings();
+  }
 });
 
 client.login(config.token).catch(console.error);
