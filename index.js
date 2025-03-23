@@ -318,7 +318,7 @@ client.on('interactionCreate', async interaction => {
           const embed = new EmbedBuilder()
             .setColor(COLORS.PENDING)
             .setTitle(`${poll.anonymous ? '🔒 ' : ''}📊 نظرسنجی در انتظار تأیید`)
-            .setDescription('لطفاً این نظرسنجی را بررسی و تأیید یا رد کنید! 🚨')
+            .setDescription('لطفاً این نظرسنجی را بررسی و با استفاده از دکمه‌های زیر تأیید یا رد کنید! 🚨\n\n✅ تأیید: انتشار نظرسنجی در کانال\n❌ رد: لغو نظرسنجی')
             .addFields(
               { name: `${EMOJIS.QUESTION} سوال`, value: poll.question, inline: false },
               { name: `${EMOJIS.OPTIONS} گزینه‌ها`, value: poll.options.map((opt, i) => `${reactionEmojis[i]} ${opt}`).join('\n'), inline: false },
@@ -410,6 +410,19 @@ client.on('interactionCreate', async interaction => {
       config.pendingPolls.delete(pollId);
       await saveSettings();
 
+      // Notify poll creator
+      try {
+        const creator = await client.users.fetch(poll.creator);
+        const notifyEmbed = new EmbedBuilder()
+          .setColor(COLORS.SUCCESS)
+          .setTitle(`${EMOJIS.SUCCESS} نظرسنجی شما تأیید شد`)
+          .setDescription(`نظرسنجی شما با موضوع "${poll.question}" تأیید و در <#${config.pollChannel}> منتشر شد`)
+          .setTimestamp();
+        await creator.send({ embeds: [notifyEmbed] });
+      } catch (error) {
+        console.error('Could not notify poll creator:', error);
+      }
+
       const updatedEmbed = new EmbedBuilder()
         .setTitle('✅ نظرسنجی تأیید شد')
         .setColor(COLORS.SUCCESS)
@@ -448,7 +461,21 @@ client.on('messageReactionAdd', async (reaction, user) => {
   const emoji = reaction.emoji.name;
   if (!reactionEmojis.includes(emoji)) {
     await reaction.users.remove(user);
+    return;
   }
+
+  // Check for duplicate votes
+  if (poll.voters.has(user.id)) {
+    const previousVote = poll.voters.get(user.id);
+    if (previousVote !== emoji) {
+      const prevReaction = reaction.message.reactions.cache.get(previousVote);
+      if (prevReaction) await prevReaction.users.remove(user);
+      poll.voters.set(user.id, emoji);
+    }
+  } else {
+    poll.voters.set(user.id, emoji);
+  }
+  await saveSettings();
 });
 
 client.login(config.token).catch(console.error);
