@@ -136,20 +136,30 @@ function startPollChecker() {
           await endPoll(messageId);
         } else {
           const channel = await client.channels.fetch(config.pollChannel);
-          const message = await channel.messages.fetch(messageId);
-          const embed = message.embeds[0];
-          
-          const updatedEmbed = new EmbedBuilder(embed.data)
-            .spliceFields(2, 1, { 
-              name: `${EMOJIS.TIME_REMAINING} زمان باقیمانده`,
-              value: `<t:${Math.floor(poll.endTime / 1000)}:R>`,
-              inline: true 
-            });
-          
-          await message.edit({ embeds: [updatedEmbed] });
+          try {
+            const message = await channel.messages.fetch(messageId);
+            const embed = message.embeds[0];
+            
+            const updatedEmbed = new EmbedBuilder(embed.data)
+              .spliceFields(2, 1, { 
+                name: `${EMOJIS.TIME_REMAINING} زمان باقیمانده`,
+                value: `<t:${Math.floor(poll.endTime / 1000)}:R>`,
+                inline: true 
+              });
+            
+            await message.edit({ embeds: [updatedEmbed] });
+          } catch (messageError) {
+            if (messageError.code === 10008) { // Unknown Message error
+              console.log(`Poll message ${messageId} was deleted, removing from active polls`);
+              config.activePolls.delete(messageId);
+              await saveSettings();
+            } else {
+              throw messageError;
+            }
+          }
         }
       } catch (error) {
-        console.error('Error updating poll:', error);
+        console.error('Error in poll checker:', error);
       }
     }
   }, 60000);
